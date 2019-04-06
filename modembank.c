@@ -59,6 +59,12 @@ int main( int argc, char * argv[] )
         // Add conn sockets to array
         for ( icn = headconn; icn != NULL && i < pfd_size; icn = icn->next )
         {
+            if ( icn->garbage )
+            {
+                printf( "Uncaught garbage conn\n" );
+                continue;
+            }
+
             pfds[i].fd = icn->sock;
             pfds[i].events = 0;
 
@@ -91,16 +97,23 @@ int main( int argc, char * argv[] )
                 // Create struct
                 struct conn * newconn = (struct conn *) malloc( sizeof(struct conn) );
 
-                // Init struct
+                // Save socket
                 newconn->sock = connsock;
+                // Empty buffer
                 newconn->buflen = 0;
+                // Take note of current time
                 newconn->first = newconn->last = time(NULL);
+                // Set flags
                 newconn->admin = 0;
                 newconn->garbage = 0;
+                // Init linked list
                 newconn->prev = newconn->next = NULL;
+                // Default terminal size
+                newconn->width = 80;
+                newconn->height = 24;
 
-                // Telnet init string
-                write( connsock, "\xFF\xFD\x22\xFF\xFB\x01\xFF\xFB\x03\xFF\xFD\x1F", 12 );
+                // Transmit telnet init string
+                write( connsock, "\xFF\xFD\x22\xFF\xFB\x01\xFF\xFB\x03\xFF\xFD\x1F\xFF\xFD\x18", 15 );
 
                 // ICN should still point to end of list, set next pointer
                 // to the new conn struct
@@ -151,18 +164,23 @@ int main( int argc, char * argv[] )
                 icn->last = time(NULL);
             }
 
-            // Run the shell
-            modemshell( icn );
+            // Check if we were sent telnet options
+            if ( !telnetOptions( icn ) )
+            {
+                // Run the shell
+                modemShell( icn );
+            }
 
             // Increment i
             i++;
         }
 
         // Conn garbage collection
+        struct conn * garbconn;
         icn = headconn;
         while ( icn != NULL )
         {
-            struct conn * garbconn = icn;
+            garbconn = icn;
             icn = icn->next; // Gotta do this before we free the conn
 
             if ( garbconn->garbage )
@@ -171,16 +189,24 @@ int main( int argc, char * argv[] )
                 {
                     // Update node after us to be new head
                     headconn = garbconn->next;
-                    headconn->prev = NULL;
+                    // Check if last node
+                    if ( headconn != NULL ) headconn->prev = NULL;
                 }
-                else // We're elsewher
+                else // We're elsewhere
                 {
                     garbconn->prev->next = garbconn->next; // Update node before us
-                    garbconn->next->prev = garbconn->prev; // Update node after us
+
+                    // Check if we're the last node
+                    if ( garbconn->next != NULL )
+                    {
+                        garbconn->next->prev = garbconn->prev; // Update node after us
+                    }
                 }
 
                 conn_count--;
                 free( garbconn );
+
+                printf("Cleaned up an account\n");
             }
         }
 
@@ -189,7 +215,71 @@ int main( int argc, char * argv[] )
     }
 }
 
-void modemshell( struct conn * mconn )
+int telnetOptions( struct conn * mconn )
+{
+    if ( mconn->buflen <= 0 ) return 0;
+
+    if ( mconn->buf[0] != '\xFF' ) return 0; // All options start with 0xFF
+
+    printf("Telnet options string:");
+
+    int curOpt = -1;
+    int optPos = 0;
+
+    for ( int i = 0; i < mconn->buflen; i++ )
+    {
+        unsigned char cbyt = mconn->buf[i] & 0xFF;
+
+        if ( cbyt == 0xFF ) // Start of new command
+        {
+            curOpt = -1;
+            optPos = 0;
+            printf("\n");
+        }
+        else if ( curOpt < 0 && optPos == 2 ) // Command type
+        {
+            curOpt = cbyt;
+        }
+        else
+        {
+            switch ( curOpt ) // Handle command
+            {
+                case 0x1F: // Negotiate About Windows Size (NAWS)
+                    switch ( optPos )
+                    {
+                        case 3: mconn->width = cbyt << 8; break;
+                        case 4: mconn->width += cbyt; break;
+                        case 5: mconn->height = cbyt << 8; break;
+                        case 6:
+                            mconn->height += cbyt;
+                            printf( "New terminal size: %d by %d\n", mconn->width, mconn->height );
+                            break;
+                    }
+                    break;
+                case 0x18: // Terminal Type
+                    if ( optPos <= 3 )
+                    {
+                        memset( mconn->termtype, '\0', 21 );
+                    }
+                    else if ( optPos < 23 )
+                    {
+                        mconn->termtype[optPos - 4] = cbyt;
+                    }
+                    break;
+            }
+        }
+
+        optPos++;
+
+        printf("%02x|", cbyt );
+    }
+
+    printf( "\n" );
+
+    mconn->buflen = 0;
+}
+
+void modemShell( struct conn * mconn )
 {
     if ( mconn->buflen != 1 ) return;
 
@@ -200,5 +290,4 @@ void modemshell( struct conn * mconn )
     write( mconn->sock, echoback, strlen( echoback ) );
 
     mconn->buflen = 0;
-    mconn->buf[0] = '\0';
 }
