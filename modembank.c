@@ -37,10 +37,10 @@ int main( int argc, char * argv[] )
     listen( servsock, 5 );
     clilen = sizeof(cli_addr);
 
-    struct conn * headconn;
-    struct conn * icn;
+    struct conn * headconn; // First conn in the list
+    struct conn * icn; // For iterrating through conns
     int i;
-    int conn_count = 0;
+    int conn_count = 0; // Total number of conns
 
     while (1)
     {
@@ -54,16 +54,13 @@ int main( int argc, char * argv[] )
         pfds[0].events = POLLIN;
 
         // Add conn sockets to array
-        for ( icn = headconn; icn->nconn != NULL; icn = icn->nconn )
+        for ( icn = headconn; icn->next != NULL; icn = icn->next )
         {
-            pfds[0]->fd = icn->sock;
-            pfds[0]->events = 0;
+            pfds[0].fd = icn->sock;
+            pfds[0].events = 0;
 
             // Can we read?
-            if ( icn->lenin < BUFFER_LEN_IN ) pfds[0].events &= POLLIN;
-
-            // Do we need to write?
-            if ( icn->lenout > 0 ) pfds[0].events &= POLLOUT;
+            if ( icn->buflen < BUFFER_LEN ) pfds[0].events &= POLLIN;
         }
 
         poll( pfds, pfd_size, TIMEOUT * 1000 );
@@ -79,28 +76,36 @@ int main( int argc, char * argv[] )
             else
             {
                 // Create struct
-                struct conn * newconn = malloc( sizeof(struct conn) );
+                struct conn * newconn = (struct conn *) malloc( sizeof(struct conn) );
 
                 // Init struct
-                newconn.sock = connsock;
-                newconn.buflen = 0;
-                newconn.first = newconn.last = time(NULL);
-                newconn.admin = 0;
-                newconn.garbage = 0;
+                newconn->sock = connsock;
+                newconn->buflen = 0;
+                newconn->first = newconn->last = time(NULL);
+                newconn->admin = 0;
+                newconn->garbage = 0;
 
                 // Telnet init string
-                write( newconn, "\xFF\xFD\x22\xFF\xFB\x01\xFF\xFB\x03\xFF\xFD\x1F", 12 );
+                write( connsock, "\xFF\xFD\x22\xFF\xFB\x01\xFF\xFB\x03\xFF\xFD\x1F", 12 );
 
                 // ICN should still point to end of list, set next pointer
                 // to the new conn struct
-                icn->nconn = newconn;
+                if ( icn != NULL )
+                {
+                    icn->next = newconn;
+                    newconn->prev = icn;
+                }
+                else // List is empty
+                {
+                    headconn = newconn;
+                }
                 // Increment count
                 conn_count++;
             }
         }
 
         i = 1;
-        for ( icn = headconn; icn->nconn != NULL; icn = icn->nconn )
+        for ( icn = headconn; icn->next != NULL; icn = icn->next )
         {
             if ( pfds[i].revents & POLLHUP ) // Socket closed
             {
@@ -108,21 +113,50 @@ int main( int argc, char * argv[] )
                 close( icn->sock );
                 // Mark for garbage collection
                 icn->garbage = 1;
+                // Increment i
+                i++;
+                // Skip the rest
+                continue;
             }
-            else if ( pfds[i].revents & POLLIN ) // Data to be read
+
+            if ( pfds[i].revents & POLLIN ) // Data to be read
             {
                 icn->buflen = read( icn->sock, icn->buf + icn->buflen, BUFFER_LEN - icn->buflen );
             }
+
+            // Run the shell
+            modemshell( icn );
 
             i++;
         }
 
         // Conn garbage collection
-        for ( icn = headconn; icn->nconn != NULL; icn = icn->nconn )
+        icn = headconn;
+        while ( icn != NULL );
         {
-            
+            struct conn * garbconn = icn;
+            icn = icn->next; // Gotta do this before we free the conn
+
+            if ( garbconn->garbage )
+            {
+                if ( garbconn == headconn ) // We're the first node
+                {
+                    // Update node after us to be new head
+                    headconn = garbconn->next;
+                    headconn->prev = NULL;
+                }
+                else // We're elsewher
+                {
+                    garbconn->prev->next = garbconn->next; // Update node before us
+                    garbconn->next->prev = garbconn->prev; // Update node after us
+                }
+
+                conn_count--;
+                free( garbconn );
+            }
         }
 
+        // We re-compute this list each time, so free it here
         free( pfds );
     }
 }

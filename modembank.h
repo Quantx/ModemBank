@@ -20,7 +20,7 @@ struct conn
     char command[100]; // Stores the current command line
 
     char buf[BUFFER_LEN];   // Stores incoming data from the socket
-    int buflen;               // Stores number of bytes coming in
+    int buflen;             // Stores number of bytes coming in
 
     int admin; // Boolean, is this user an admin?
     int garbage; // Boolean, delete if true
@@ -28,7 +28,8 @@ struct conn
     time_t first;
     time_t last;
 
-    struct conn * nconn; // Next conn in the linked list
+    struct conn * next; // Next conn in the linked list
+    struct conn * prev; // Prev conn in the linked list
 };
 
 void modemshell(struct conn * mconn);
