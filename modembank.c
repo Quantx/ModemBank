@@ -104,6 +104,11 @@ int main( int argc, char * argv[] )
                 newconn->buflen = 0;
                 // Take note of current time
                 newconn->first = newconn->last = time(NULL);
+                // Set command line
+                newconn->cmdsec = 0;
+                newconn->cmdwnt = 20; // First prompt is username
+                newconn->cmdlen = 0;
+                newconn->cmdpos = 0;
                 // Set flags
                 newconn->sentinel = 0;
                 newconn->admin = 0;
@@ -135,7 +140,7 @@ int main( int argc, char * argv[] )
             if ( pfds[i].revents & POLLIN ) // Data to be read
             {
                 // Read in data
-                icn->buflen = read( icn->sock, icn->buf + icn->buflen, BUFFER_LEN - icn->buflen );
+                icn->buflen += read( icn->sock, icn->buf + icn->buflen, BUFFER_LEN - icn->buflen );
 
                 // Check for termination
                 if ( !icn->buflen )
@@ -151,11 +156,13 @@ int main( int argc, char * argv[] )
             }
 
             // Check if we were sent telnet options
-            if ( !telnetOptions( icn ) )
-            {
-                // Run the shell
-                modemShell( icn );
-            }
+            telnetOptions( icn );
+
+            // Process command line
+            commandLine( icn );
+
+            // Run the shell
+            modemShell( icn );
         }
 
         // Conn garbage collection
@@ -243,18 +250,197 @@ int telnetOptions( conn * mconn )
         for ( ctok++; ctok < mconn->buf + mconn->buflen && ctok[0] != '\xFF'; ctok++ );
     }
 
+    // Empty the buffer
+    mconn->buflen = 0;
+
+    return 1;
+}
+
+void commandLine( conn * mconn )
+{
+    // Nothing to do here
+    if ( mconn->buflen <= 0 || mconn->cmdwnt <= 0 ) return;
+
+    char acms[9]; // For sending ANSI CSI strings
+    int i;
+
+    // Fix a weird bug
+    if ( mconn->buf[0] == '\x0D' && mconn->buf[1] == '\0' ) mconn->buflen = 1;
+
+    if ( mconn->buflen == 1 ) // Standard ascii
+    {
+        // Check if this is printable ascii
+        if ( mconn->buf[0] >= 32 && mconn->buf[0] < 127 )
+        {
+            // Check if we have room in the command string
+            if ( mconn->cmdlen < mconn->cmdwnt && mconn->cmdlen < COMMAND_LEN )
+            {
+                // Make room for character
+                for ( i = mconn->cmdlen; i > mconn->cmdpos; i-- )
+                {
+                    mconn->cmdbuf[i] = mconn->cmdbuf[i - 1];
+                }
+
+                // Insert character
+                mconn->cmdbuf[i] = mconn->buf[0];
+                // Increase string length
+                mconn->cmdlen++;
+
+                if ( !mconn->cmdsec )
+                {
+                    // Reprint string
+                    write( mconn->sock, mconn->cmdbuf + mconn->cmdpos, mconn->cmdlen - mconn->cmdpos );
+                    // Move cursor back to correct spot
+                    for ( i = mconn->cmdlen; i > mconn->cmdpos + 1; i-- ) write( mconn->sock, "\b", 1 );
+                }
+                // Advance cursor
+                mconn->cmdpos++;
+            }
+            else
+            {
+                // No room, ring their bell to let them know
+                write( mconn->sock, "\a", 1 );
+            }
+        }
+        else if ( mconn->buf[0] == '\x0D' ) // Return character sent
+        {
+            // Add null byte
+            mconn->cmdbuf[mconn->cmdlen] = '\0';
+
+            // Reset internal vars
+            mconn->cmdlen = 0;
+            mconn->cmdpos = 0;
+
+            // Indicate ready
+            mconn->cmdwnt = 0;
+
+            // Send newline
+            write( mconn->sock, "\r\n", 2 );
+
+            // Log command
+            if ( mconn->cmdsec )
+            {
+                printf( "New secure command\n" );
+            }
+            else
+            {
+                printf( "New command: '%s'\n", mconn->cmdbuf );
+            }
+        }
+        else if ( mconn->buf[0] == '\b' || mconn->buf[0] == '\x7F' ) // Backspace character sent
+        {
+            if ( mconn->cmdpos > 0 ) // Anything to delete?
+            {
+                // Shift all characters left by one
+                for ( i = mconn->cmdpos; i < mconn->cmdlen; i++ )
+                {
+                    mconn->cmdbuf[i - 1] = mconn->cmdbuf[i];
+                }
+
+                // Decrease length of string
+                mconn->cmdlen--;
+
+                // Move cursor
+                mconn->cmdpos--;
+
+                if ( !mconn->cmdsec )
+                {
+                    write( mconn->sock, "\b", 1 );
+                    // Reprint string
+                    write( mconn->sock, mconn->cmdbuf + mconn->cmdpos, mconn->cmdlen - mconn->cmdpos );
+                    // Add a space to cover up deleted char
+                    write( mconn->sock, " \b", 2 );
+                    // Move cursor back to correct spot
+                    for ( i = mconn->cmdlen; i > mconn->cmdpos; i-- ) write( mconn->sock, "\b", 1 );
+                }
+            }
+        }
+        else
+        {
+            printf( "Got unknown ascii: %02x\n", mconn->buf[0] & 0xFF );
+        }
+    }
+    else if ( mconn->buf[0] == '\e' && mconn->buf[1] == '[' )// Extended control string (Arrow key, Home, etc.)
+    {
+        switch ( mconn->buf[2] ) // Check for arrow keys
+        {
+            case 'A': // Up arrow
+                break;
+            case 'B': // Down arrow
+                break;
+            case 'C': // Right arrow
+                if ( mconn->cmdpos < mconn->cmdlen )
+                {
+                    // Move cursor to the right
+                    mconn->cmdpos++;
+                    if ( !mconn->cmdsec ) write( mconn->sock, "\e[C", 3 );
+                }
+                break;
+            case 'D': // Left arrow
+                if ( mconn->cmdpos > 0 )
+                {
+                    // Move cursor to the left
+                    mconn->cmdpos--;
+                    if ( !mconn->cmdsec ) write( mconn->sock, "\b", 1 );
+                }
+                break;
+            case 'H': // Home
+                if ( mconn->cmdpos > 0 )
+                {
+                    mconn->cmdpos = 0;
+                    write( mconn->sock, "\r", 1 );
+                }
+                break;
+            case 'F': // End
+                if ( mconn->cmdpos > 0 )
+                {
+                    if ( !mconn->cmdsec )
+                    {
+                        // Compute ANSI CSI string
+                        sprintf( acms, "\e[%dC", mconn->cmdlen - mconn->cmdpos );
+                        write( mconn->sock, acms, strlen( acms ) );
+                    }
+                    // Update cursor position
+                    mconn->cmdpos = mconn->cmdlen;
+                }
+                break;
+            case '3': // Delete
+                if ( mconn->cmdpos < mconn->cmdlen )
+                {
+                    // Shift all characters left by one
+                    for ( i = mconn->cmdpos; i < mconn->cmdlen - 1; i++ )
+                    {
+                        mconn->cmdbuf[i] = mconn->cmdbuf[i + 1];
+                    }
+
+                    // Decrease length of string
+                    mconn->cmdlen--;
+
+                    if ( !mconn->cmdsec )
+                    {
+                        // Reprint string
+                        write( mconn->sock, mconn->cmdbuf + mconn->cmdpos, mconn->cmdlen - mconn->cmdpos );
+                        // Add a space to cover up deleted char
+                        write( mconn->sock, " \b", 2 );
+                        // Move cursor back to correct spot
+                        for ( i = mconn->cmdlen; i > mconn->cmdpos; i-- ) write( mconn->sock, "\b", 1 );
+                    }
+                }
+                break;
+        }
+    }
+    else
+    {
+        printf( "Random string:\n" );
+        for ( i = 0; i < mconn->buflen; i++ )printf( "%02x|", mconn->buf[i] & 0xFF );
+        printf( "\n" );
+    }
+
+    // Empty the buffer
     mconn->buflen = 0;
 }
 
 void modemShell( conn * mconn )
 {
-    if ( mconn->buflen != 1 ) return;
 
-    char echoback[BUFFER_LEN + 32];
-
-    sprintf( echoback, "Got the following string: '%s'\r\n", mconn->buf );
-
-    write( mconn->sock, echoback, strlen( echoback ) );
-
-    mconn->buflen = 0;
 }

@@ -20,10 +20,15 @@ typedef struct conn
 {
     int sock; // Stores the client socket fd
     char username[USERNAME_LEN + 1]; // Username of the client
-    char command[COMMAND_LEN + 1]; // Stores the current command line
+
+    char cmdbuf[COMMAND_LEN + 1]; // Stores the current command line
+    int cmdsec; // Boolean, does not echo characters typed if true
+    int cmdwnt; // Number of bytes wanted, should not excede COMMAND_LEN, a value of 0 indicates that cmdbuf holds a valid string
+    int cmdlen; // Length of current command
+    int cmdpos; // Position of the cursor
 
     char buf[BUFFER_LEN + 1]; // Stores incoming data from the socket
-    int buflen; // Stores number of bytes coming in
+    int buflen; // Stores number of bytes in buf
 
     int sentinel; // This is a sentinel node
     int admin; // Boolean, is this user an admin?
@@ -43,5 +48,6 @@ typedef struct conn
     struct conn * prev; // Prev conn in the linked list
 } conn;
 
-int telnetOptions(struct conn * mconn);
-void modemShell(struct conn * mconn);
+int telnetOptions(conn * mconn);
+void commandLine(conn * mconn);
+void modemShell(conn * mconn);
