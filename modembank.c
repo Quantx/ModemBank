@@ -196,60 +196,52 @@ int telnetOptions( conn * mconn )
 
     if ( mconn->buf[0] != '\xFF' ) return 0; // All options start with 0xFF
 
-    printf("Telnet options string:");
+    int i;
+    char * ctok = mconn->buf;
 
-    int curOpt = -1;
-    int optPos = 0;
+    printf( "Telnet options string:\n" );
 
-    for ( int i = 0; i < mconn->buflen; i++ )
+    for ( i = 0; i < mconn->buflen; i++ ) printf( "%02x|", mconn->buf[i] & 0xFF );
+
+    printf( "\n" );
+
+    while ( ctok < mconn->buf + mconn->buflen )
     {
-        unsigned char cbyt = mconn->buf[i] & 0xFF;
-
-        if ( cbyt == 0xFF ) // Start of new command
+        if ( ctok[1] == '\xFA' ) // Sub negotiate params
         {
-            curOpt = -1;
-            optPos = 0;
-            printf("\n");
-        }
-        else if ( curOpt < 0 && optPos == 2 ) // Command type
-        {
-            curOpt = cbyt;
-        }
-        else
-        {
-            switch ( curOpt ) // Handle command
+            switch ( ctok[2] ) // What type of option?
             {
-                case 0x1F: // Negotiate About Windows Size (NAWS)
-                    switch ( optPos )
-                    {
-                        case 3: mconn->width = cbyt << 8; break;
-                        case 4: mconn->width += cbyt; break;
-                        case 5: mconn->height = cbyt << 8; break;
-                        case 6:
-                            mconn->height += cbyt;
-                            printf( "New terminal size: %d by %d\n", mconn->width, mconn->height );
-                            break;
-                    }
+                case '\x1F': // Negotiate About Window Size (NAWS)
+                    mconn->width  = (ctok[3] << 8) + ctok[4];
+                    mconn->height = (ctok[5] << 8) + ctok[6];
+                    printf( "Set terminal size to: %d by %d\n", mconn->width, mconn->height );
                     break;
-                case 0x18: // Terminal Type
-                    if ( optPos <= 3 )
+                case '\x18': // Terminal type
+                    for ( i = 0; i < TERMTYPE_LEN && i + 4 + ctok < mconn->buf + mconn->buflen; i++ )
                     {
-                        memset( mconn->termtype, '\0', 21 );
+                        // End of negotiation
+                        if ( ctok[i + 4] == '\xFF' && ctok[i + 5] == '\xF0' ) break;
+                        // Copy char
+                        mconn->termtype[i] = ctok[i + 4];
                     }
-                    else if ( optPos < 23 )
-                    {
-                        mconn->termtype[optPos - 4] = cbyt;
-                    }
+                    mconn->termtype[i] = '\0';
+                    printf( "Set terminal type to: '%s'\n", mconn->termtype );
+                    break;
+            }
+        }
+        else if ( ctok[1] == '\xFB' ) // WILL
+        {
+            switch ( ctok[2] ) // What option?
+            {
+                case '\x18': // Terminal type
+                    // Request terminal name
+                    write( mconn->sock, "\xFF\xFA\x18\x01\xFF\xF0", 6 );
                     break;
             }
         }
 
-        optPos++;
-
-        printf("%02x|", cbyt );
+        for ( ctok++; ctok < mconn->buf + mconn->buflen && ctok[0] != '\xFF'; ctok++ );
     }
-
-    printf( "\n" );
 
     mconn->buflen = 0;
 }

@@ -12,12 +12,15 @@
 
 #define TIMEOUT 5
 #define BUFFER_LEN 256
+#define TERMTYPE_LEN 20
+#define USERNAME_LEN 20
+#define COMMAND_LEN 100
 
 typedef struct conn
 {
     int sock; // Stores the client socket fd
-    char username[21]; // Username of the client
-    char command[100]; // Stores the current command line
+    char username[USERNAME_LEN + 1]; // Username of the client
+    char command[COMMAND_LEN + 1]; // Stores the current command line
 
     char buf[BUFFER_LEN + 1]; // Stores incoming data from the socket
     int buflen; // Stores number of bytes coming in
@@ -31,7 +34,7 @@ typedef struct conn
     int height;
 
     // Terminal type
-    char termtype[21];
+    char termtype[TERMTYPE_LEN + 1];
 
     time_t first; // Unix time of initial connect
     time_t last; // Unix time of last char recived
