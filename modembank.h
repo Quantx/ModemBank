@@ -13,15 +13,16 @@
 #define TIMEOUT 5
 #define BUFFER_LEN 256
 
-struct conn
+typedef struct conn
 {
     int sock; // Stores the client socket fd
     char username[21]; // Username of the client
     char command[100]; // Stores the current command line
 
-    char buf[BUFFER_LEN + 1];   // Stores incoming data from the socket
-    int buflen;             // Stores number of bytes coming in
+    char buf[BUFFER_LEN + 1]; // Stores incoming data from the socket
+    int buflen; // Stores number of bytes coming in
 
+    int sentinel; // This is a sentinel node
     int admin; // Boolean, is this user an admin?
     int garbage; // Boolean, delete if true
 
@@ -37,7 +38,7 @@ struct conn
 
     struct conn * next; // Next conn in the linked list
     struct conn * prev; // Prev conn in the linked list
-};
+} conn;
 
 int telnetOptions(struct conn * mconn);
 void modemShell(struct conn * mconn);

@@ -37,8 +37,12 @@ int main( int argc, char * argv[] )
     listen( servsock, 5 );
     clilen = sizeof(cli_addr);
 
-    struct conn * headconn = NULL; // First conn in the list
-    struct conn * icn; // For iterrating through conns
+    // Build the sentinel node
+    conn headconn;
+    headconn.sentinel = 1;
+    headconn.prev = headconn.next = &headconn;
+
+    conn * icn; // For iterrating through conns
     int i;
     int conn_count = 0; // Total number of conns
 
@@ -57,7 +61,7 @@ int main( int argc, char * argv[] )
 
         i = 1;
         // Add conn sockets to array
-        for ( icn = headconn; icn != NULL && i < pfd_size; icn = icn->next )
+        for ( icn = headconn.next; icn != &headconn && i < pfd_size; (icn = icn->next),i++ )
         {
             if ( icn->garbage )
             {
@@ -73,9 +77,6 @@ int main( int argc, char * argv[] )
             {
                 pfds[i].events = POLLIN;
             }
-
-            // Increment i
-            i++;
         }
 
         printf( "Polling %d clients\n", i - 1 );
@@ -95,7 +96,7 @@ int main( int argc, char * argv[] )
                 printf( "New connection\n" );
 
                 // Create struct
-                struct conn * newconn = (struct conn *) malloc( sizeof(struct conn) );
+                conn * newconn = malloc( sizeof(conn) );
 
                 // Save socket
                 newconn->sock = connsock;
@@ -104,10 +105,9 @@ int main( int argc, char * argv[] )
                 // Take note of current time
                 newconn->first = newconn->last = time(NULL);
                 // Set flags
+                newconn->sentinel = 0;
                 newconn->admin = 0;
                 newconn->garbage = 0;
-                // Init linked list
-                newconn->prev = newconn->next = NULL;
                 // Default terminal size
                 newconn->width = 80;
                 newconn->height = 24;
@@ -115,21 +115,14 @@ int main( int argc, char * argv[] )
                 // Transmit telnet init string
                 write( connsock, "\xFF\xFD\x22\xFF\xFB\x01\xFF\xFB\x03\xFF\xFD\x1F\xFF\xFD\x18", 15 );
 
-                // ICN should still point to end of list, set next pointer
-                // to the new conn struct
-                if ( headconn == NULL )
-                {
-                    // List is empty
-                    headconn = newconn;
-                }
-                else
-                {
-                    // Get last element in list
-                    for ( icn = headconn; icn->next != NULL; icn = icn->next );
-                    // Insert at end
-                    icn->next = newconn;
-                    newconn->prev = icn;
-                }
+                // Set the position of our current node
+                newconn->prev = headconn.prev;
+                newconn->next = &headconn;
+
+                // Update the last node in the list to point to newconn
+                headconn.prev->next = newconn;
+                // Update sentinel node to point to newconn
+                headconn.prev = newconn;
 
                 // Increment count
                 conn_count++;
@@ -137,25 +130,18 @@ int main( int argc, char * argv[] )
         }
 
         i = 1;
-        for ( icn = headconn; icn != NULL && i < pfd_size; icn = icn->next )
+        for ( icn=headconn.next; icn != &headconn && i < pfd_size; (icn = icn->next),i++ )
         {
-            if ( pfds[i].revents & POLLHUP ) // Socket closed
-            {
-                printf( "Client disconnected\n" );
-                // Ensure socket is closed
-                close( icn->sock );
-                // Mark for garbage collection
-                icn->garbage = 1;
-                // Increment i
-                i++;
-                // Skip the rest
-                continue;
-            }
-
             if ( pfds[i].revents & POLLIN ) // Data to be read
             {
                 // Read in data
                 icn->buflen = read( icn->sock, icn->buf + icn->buflen, BUFFER_LEN - icn->buflen );
+
+                // Check for termination
+                if ( !icn->buflen )
+                {
+                    icn->garbage = 1;
+                }
 
                 // Add end of string char
                 icn->buf[icn->buflen] = '\0';
@@ -170,43 +156,32 @@ int main( int argc, char * argv[] )
                 // Run the shell
                 modemShell( icn );
             }
-
-            // Increment i
-            i++;
         }
 
         // Conn garbage collection
-        struct conn * garbconn;
-        icn = headconn;
-        while ( icn != NULL )
+        conn * garbconn;
+        icn = headconn.next;
+        while ( icn != &headconn )
         {
             garbconn = icn;
             icn = icn->next; // Gotta do this before we free the conn
 
-            if ( garbconn->garbage )
+            if ( garbconn->garbage && !garbconn->sentinel )
             {
-                if ( garbconn == headconn ) // We're the first node
-                {
-                    // Update node after us to be new head
-                    headconn = garbconn->next;
-                    // Check if last node
-                    if ( headconn != NULL ) headconn->prev = NULL;
-                }
-                else // We're elsewhere
-                {
-                    garbconn->prev->next = garbconn->next; // Update node before us
+                // Update node before us
+                garbconn->prev->next = garbconn->next;
+                // Update node after us
+                garbconn->next->prev = garbconn->prev;
 
-                    // Check if we're the last node
-                    if ( garbconn->next != NULL )
-                    {
-                        garbconn->next->prev = garbconn->prev; // Update node after us
-                    }
-                }
+                // Ensure our socket is closed
+                close( garbconn->sock );
 
-                conn_count--;
+                // Free the object
                 free( garbconn );
+                // Decrement count
+                conn_count--;
 
-                printf("Cleaned up an account\n");
+                printf("Client disconnected\n");
             }
         }
 
@@ -215,7 +190,7 @@ int main( int argc, char * argv[] )
     }
 }
 
-int telnetOptions( struct conn * mconn )
+int telnetOptions( conn * mconn )
 {
     if ( mconn->buflen <= 0 ) return 0;
 
@@ -279,7 +254,7 @@ int telnetOptions( struct conn * mconn )
     mconn->buflen = 0;
 }
 
-void modemShell( struct conn * mconn )
+void modemShell( conn * mconn )
 {
     if ( mconn->buflen != 1 ) return;
 
