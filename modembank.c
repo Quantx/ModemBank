@@ -37,14 +37,16 @@ int main( int argc, char * argv[] )
     listen( servsock, 5 );
     clilen = sizeof(cli_addr);
 
-    struct conn * headconn; // First conn in the list
+    struct conn * headconn = NULL; // First conn in the list
     struct conn * icn; // For iterrating through conns
     int i;
     int conn_count = 0; // Total number of conns
 
+    printf( "Started terminal server on port: %d\n", portno );
+
     while (1)
     {
-        // The "1" is for the server socket
+        // The 1 is for the server socket
         int pfd_size = 1 + conn_count;
 
         struct pollfd * pfds = malloc( sizeof(struct pollfd) * pfd_size );
@@ -53,15 +55,24 @@ int main( int argc, char * argv[] )
         pfds[0].fd = servsock;
         pfds[0].events = POLLIN;
 
+        i = 1;
         // Add conn sockets to array
-        for ( icn = headconn; icn->next != NULL; icn = icn->next )
+        for ( icn = headconn; icn != NULL && i < pfd_size; icn = icn->next )
         {
-            pfds[0].fd = icn->sock;
-            pfds[0].events = 0;
+            pfds[i].fd = icn->sock;
+            pfds[i].events = 0;
 
             // Can we read?
-            if ( icn->buflen < BUFFER_LEN ) pfds[0].events &= POLLIN;
+            if ( icn->buflen < BUFFER_LEN )
+            {
+                pfds[i].events = POLLIN;
+            }
+
+            // Increment i
+            i++;
         }
+
+        printf( "Polling %d clients\n", i - 1 );
 
         poll( pfds, pfd_size, TIMEOUT * 1000 );
 
@@ -75,6 +86,8 @@ int main( int argc, char * argv[] )
             }
             else
             {
+                printf( "New connection\n" );
+
                 // Create struct
                 struct conn * newconn = (struct conn *) malloc( sizeof(struct conn) );
 
@@ -84,31 +97,38 @@ int main( int argc, char * argv[] )
                 newconn->first = newconn->last = time(NULL);
                 newconn->admin = 0;
                 newconn->garbage = 0;
+                newconn->prev = newconn->next = NULL;
 
                 // Telnet init string
                 write( connsock, "\xFF\xFD\x22\xFF\xFB\x01\xFF\xFB\x03\xFF\xFD\x1F", 12 );
 
                 // ICN should still point to end of list, set next pointer
                 // to the new conn struct
-                if ( icn != NULL )
+                if ( headconn == NULL )
                 {
+                    // List is empty
+                    headconn = newconn;
+                }
+                else
+                {
+                    // Get last element in list
+                    for ( icn = headconn; icn->next != NULL; icn = icn->next );
+                    // Insert at end
                     icn->next = newconn;
                     newconn->prev = icn;
                 }
-                else // List is empty
-                {
-                    headconn = newconn;
-                }
+
                 // Increment count
                 conn_count++;
             }
         }
 
         i = 1;
-        for ( icn = headconn; icn->next != NULL; icn = icn->next )
+        for ( icn = headconn; icn != NULL && i < pfd_size; icn = icn->next )
         {
             if ( pfds[i].revents & POLLHUP ) // Socket closed
             {
+                printf( "Client disconnected\n" );
                 // Ensure socket is closed
                 close( icn->sock );
                 // Mark for garbage collection
@@ -121,18 +141,26 @@ int main( int argc, char * argv[] )
 
             if ( pfds[i].revents & POLLIN ) // Data to be read
             {
+                // Read in data
                 icn->buflen = read( icn->sock, icn->buf + icn->buflen, BUFFER_LEN - icn->buflen );
+
+                // Add end of string char
+                icn->buf[icn->buflen] = '\0';
+
+                // Up date last
+                icn->last = time(NULL);
             }
 
             // Run the shell
             modemshell( icn );
 
+            // Increment i
             i++;
         }
 
         // Conn garbage collection
         icn = headconn;
-        while ( icn != NULL );
+        while ( icn != NULL )
         {
             struct conn * garbconn = icn;
             icn = icn->next; // Gotta do this before we free the conn
@@ -163,5 +191,14 @@ int main( int argc, char * argv[] )
 
 void modemshell( struct conn * mconn )
 {
+    if ( mconn->buflen != 1 ) return;
 
+    char echoback[BUFFER_LEN + 32];
+
+    sprintf( echoback, "Got the following string: '%s'\r\n", mconn->buf );
+
+    write( mconn->sock, echoback, strlen( echoback ) );
+
+    mconn->buflen = 0;
+    mconn->buf[0] = '\0';
 }
