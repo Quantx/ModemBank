@@ -98,6 +98,11 @@ int main( int argc, char * argv[] )
                 // Create struct
                 conn * newconn = malloc( sizeof(conn) );
 
+                // Set default username
+                strcpy( newconn->username, "Guest" );
+                // Clear login prompt
+                newconn->tempuser[0] = '\0';
+                newconn->temppass[0] = '\0';
                 // Save socket
                 newconn->sock = connsock;
                 // Empty buffer
