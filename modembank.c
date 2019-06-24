@@ -1,10 +1,20 @@
 #include "modembank.h"
 
+const speed_t baudlist[BAUDLIST_SIZE] = {
+    B300,
+    B1200,
+    B4800,
+    B9600,
+    B19200,
+    B38400,
+    B57600,
+    B115200
+};
+
 int main( int argc, char * argv[] )
 {
-    int servsock, connsock, portno, clilen;
+    int servsock, connsock, clilen;
     struct sockaddr_in serv_addr, cli_addr;
-    int pid;
 
     // Create socket
     servsock = socket(AF_INET, SOCK_STREAM, 0);
@@ -21,11 +31,10 @@ int main( int argc, char * argv[] )
         perror("setsockopt(SO_REUSEADDR) failed");
 
     bzero((char *) &serv_addr, sizeof(serv_addr));
-    portno = 5001;
 
     serv_addr.sin_family = AF_INET;
     serv_addr.sin_addr.s_addr = INADDR_ANY;
-    serv_addr.sin_port = htons(portno);
+    serv_addr.sin_port = htons(HOST_PORT);
 
     // Bind socket to port
     if (bind(servsock, (struct sockaddr *) &serv_addr, sizeof(serv_addr)) < 0)
@@ -37,6 +46,10 @@ int main( int argc, char * argv[] )
     listen( servsock, 5 );
     clilen = sizeof(cli_addr);
 
+    // Configure serial ports for use with modems
+    int mods[MAX_MODEMS];
+    int mod_count = configureModems( mods );
+
     // Build the sentinel node
     conn headconn;
     headconn.sentinel = 1;
@@ -46,7 +59,7 @@ int main( int argc, char * argv[] )
     int i;
     int conn_count = 0; // Total number of conns
 
-    printf( "Started terminal server on port: %d\n", portno );
+    printf( "Started terminal server on port: %d\n", HOST_PORT );
 
     while (1)
     {
@@ -100,9 +113,6 @@ int main( int argc, char * argv[] )
 
                 // Set default username
                 strcpy( newconn->username, "Guest" );
-                // Clear login prompt
-                newconn->tempuser[0] = '\0';
-                newconn->temppass[0] = '\0';
                 // Save socket
                 newconn->sock = connsock;
                 // Empty buffer
@@ -122,6 +132,8 @@ int main( int argc, char * argv[] )
                 newconn->width = 80;
                 newconn->height = 24;
 
+                // Flag this as a socket connection
+                newconn->network = 1;
                 // Transmit telnet init string
                 write( connsock, "\xFF\xFD\x22\xFF\xFB\x01\xFF\xFB\x03\xFF\xFD\x1F\xFF\xFD\x18", 15 );
 
@@ -161,7 +173,7 @@ int main( int argc, char * argv[] )
             }
 
             // Check if we were sent telnet options
-            telnetOptions( icn );
+            if ( icn->network ) telnetOptions( icn );
 
             // Process command line
             commandLine( icn );
@@ -200,6 +212,95 @@ int main( int argc, char * argv[] )
         // We re-compute this list each time, so free it here
         free( pfds );
     }
+}
+
+int configureModems( int * mods )
+{
+    printf( "Initializing modems...\n" );
+
+    int mod_count = 0;
+    struct termios modopt;
+
+    // Reset all fields
+    bzero(&modopt, sizeof(modopt));
+    // Defined parameters
+    modopt.c_iflag = IGNPAR;
+    modopt.c_oflag = 0;
+    modopt.c_cflag = CS8 | CLOCAL | CREAD;
+    modopt.c_lflag = 0;
+    // Configure read timeout conditions
+    modopt.c_cc[VMIN] = 0;
+    modopt.c_cc[VTIME] = 10;
+
+    FILE * fd = fopen( "config/ports", "r" );
+
+    if ( fd == NULL )
+    {
+        perror( "Cannot open modem config file" );
+        return -1;
+    }
+
+    char modbuf[256];
+    char * modtok;
+
+    while ( fgets( modbuf, 256, fd ) != NULL )
+    {
+        // Get the tty file to open
+        modtok = strtok( modbuf, "," );
+
+        // No baud rate specified, skip this one
+        if ( modtok == NULL ) continue;
+
+        // Open the serial port
+        int mfd = open( modtok, O_RDWR | O_NOCTTY );
+
+        // Couldn't open port
+        if ( mfd < 0 )
+        {
+            printf( "Failed to open modem %s\n", modtok );
+            continue;
+        }
+
+        // This isn't a serial port
+        if ( !isatty(mfd) )
+        {
+            printf( "Failed, %s is not a tty\n", modtok );
+            close( mfd );
+            continue;
+        }
+
+        // Get the baud rate index
+        modtok = strtok( NULL, "," );
+
+        // Convert to integer
+        int baud_index = atoi( modtok );
+
+        if ( baud_index < 0 || baud_index >= BAUDLIST_SIZE )
+        {
+            printf( "Failed, invalid baud rate index %d for modem %s\n", baud_index, modbuf );
+            close( mfd );
+            continue;
+        }
+
+        // Configure baud rate
+        cfsetispeed( &modopt, baudlist[baud_index] );
+        cfsetospeed( &modopt, baudlist[baud_index] );
+
+        // Flush I/O from the tty
+        tcflush(mfd, TCIOFLUSH);
+
+        // Flash settings to the tty
+        tcsetattr(mfd, TCSANOW, &modopt );
+
+        printf( "Intializing modem %s for baud %d\n", modbuf, baud_index );
+    }
+
+    // Remember to close the config file
+    fclose( fd );
+
+    printf( "Initialized %d modems\n", mod_count );
+
+    return mod_count;
 }
 
 int telnetOptions( conn * mconn )

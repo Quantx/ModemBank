@@ -8,18 +8,28 @@
 #include <netdb.h>
 #include <netinet/in.h>
 
+#include <termios.h>
+#include <fcntl.h>
+
 #include <string.h>
 
+#define MAX_MODEMS 8
+#define BAUDLIST_SIZE 8
+
 #define TIMEOUT 5
+#define HOST_PORT 5001
 #define BUFFER_LEN 256
 #define TERMTYPE_LEN 20
 #define USERNAME_LEN 20
 #define COMMAND_LEN 100
 
+const speed_t baudlist[BAUDLIST_SIZE];
+
 typedef struct conn
 {
     // Networking
     int sock; // Stores the client socket fd
+    int network; // Boolean, true for socket, false for tty
     char buf[BUFFER_LEN + 1]; // Stores incoming data from the socket
     int buflen; // Stores number of bytes in buf
     int garbage; // Boolean, delete if true
@@ -54,3 +64,4 @@ typedef struct conn
 int telnetOptions(conn * mconn);
 void commandLine(conn * mconn);
 void modemShell(conn * mconn);
+int configureModems(int * mods);
