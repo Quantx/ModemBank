@@ -3,6 +3,17 @@
 const speed_t baudlist[BAUDLIST_SIZE] = { B300, B1200, B4800, B9600, B19200, B38400, B57600, B115200 };
 const int    baudalias[BAUDLIST_SIZE] = {  300,  1200,  4800,  9600,  19200,  38400,  57600,  115200 };
 
+const int baudalias[BAUDLIST_SIZE] = {
+    300,
+    1200,
+    4800,
+    9600,
+    19200,
+    38400,
+    57600,
+    115200
+};
+
 int main( int argc, char * argv[] )
 {
     int servsock, connsock, clilen;
