@@ -24,6 +24,7 @@
 #define COMMAND_LEN 100
 
 const speed_t baudlist[BAUDLIST_SIZE];
+const int baudalias[BAUDLIST_SIZE];
 
 typedef struct conn
 {

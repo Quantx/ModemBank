@@ -11,6 +11,17 @@ const speed_t baudlist[BAUDLIST_SIZE] = {
     B115200
 };
 
+const int baudalias[BAUDLIST_SIZE] = {
+    300,
+    1200,
+    4800,
+    9600,
+    19200,
+    38400,
+    57600,
+    115200
+};
+
 int main( int argc, char * argv[] )
 {
     int servsock, connsock, clilen;
@@ -218,6 +229,7 @@ int configureModems( int * mods )
 {
     printf( "Initializing modems...\n" );
 
+    int i;
     int mod_count = 0;
     struct termios modopt;
 
@@ -242,6 +254,7 @@ int configureModems( int * mods )
 
     char modbuf[256];
     char * modtok;
+    int baud_alias, baud_index;
 
     while ( fgets( modbuf, 256, fd ) != NULL )
     {
@@ -273,11 +286,21 @@ int configureModems( int * mods )
         modtok = strtok( NULL, "," );
 
         // Convert to integer
-        int baud_index = atoi( modtok );
+        baud_alias = atoi( modtok );
+        baud_index = -1;
 
-        if ( baud_index < 0 || baud_index >= BAUDLIST_SIZE )
+        for ( i = 0; i < BAUDLIST_SIZE; i++ )
         {
-            printf( "Failed, invalid baud rate index %d for modem %s\n", baud_index, modbuf );
+            if ( baud_alias == baudalias[i] )
+            {
+                baud_index = i;
+                break;
+            }
+        }
+
+        if ( baud_index < -1 )
+        {
+            printf( "Failed, invalid baud rate %d for modem %s\n", baud_alias, modbuf );
             close( mfd );
             continue;
         }
@@ -292,7 +315,7 @@ int configureModems( int * mods )
         // Flash settings to the tty
         tcsetattr(mfd, TCSANOW, &modopt );
 
-        printf( "Intializing modem %s for baud %d\n", modbuf, baud_index );
+        printf( "Intializing modem %s for baud %d\n", modbuf, baud_alias );
     }
 
     // Remember to close the config file
