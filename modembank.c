@@ -294,24 +294,32 @@ int configureModems( int * mods )
         // Set non-blocking
         modopt.c_cc[VMIN] = 0;
 
-        // Flush I/O from the tty
-        tcflush(mfd, TCIOFLUSH);
+        // Flash settings to the tty after flushing
+        tcsetattr(mfd, TCSAFLUSH, &modopt );
 
-        // Flash settings to the tty
-        tcsetattr(mfd, TCSANOW, &modopt );
-
+        // Attempt to intialize the modem
         for ( i = 0; i < MAX_INIT_ATTEMPT; i++ )
         {
             // Send an AT command for baud rate detection
             write( mfd, "AT\r", 3 );
 
             // Wait for read
-            if ( read( mfd, atbuf, 256 ) > 0 )
+            int atsize = read( mfd, atbuf, 255 );
+
+            // Check if we got any data
+            if ( atsize > 0 )
             {
+                // Recived an OK command
                 if ( strncmp( atbuf, "OK", 2 ) == 0 )
                 {
                     printf( "Modem responded to AT command on attempt %d\n", i );
                     break;
+                }
+                else
+                {
+                    // Make the string printable
+                    atbuf[atsize] = '\0';
+                    printf( "Unknown modem response: >>>%s<<<\n", atbuf );
                 }
             }
         }
@@ -324,6 +332,7 @@ int configureModems( int * mods )
              continue;
         }
 
+        // Send reset command to modem
         write( mfd, "ATZ\r", 4 );
 
         // Set blocking
@@ -332,6 +341,10 @@ int configureModems( int * mods )
         tcsetattr(mfd, TCSANOW, &modopt );
 
         printf( "Intializing modem %s for baud %d\n", modbuf, baud_alias );
+
+        // Save the modem file descriptor
+        mods[mod_count] = mfd;
+        mod_count++;
     }
 
     // Remember to close the config file
