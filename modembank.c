@@ -234,6 +234,7 @@ int configureModems( int * mods )
     }
 
     char modbuf[256];
+    char atbuf[256];
     char * modtok;
     int baud_alias, baud_index;
 
@@ -290,10 +291,44 @@ int configureModems( int * mods )
         cfsetispeed( &modopt, baudlist[baud_index] );
         cfsetospeed( &modopt, baudlist[baud_index] );
 
+        // Set non-blocking
+        modopt.c_cc[VMIN] = 0;
+
         // Flush I/O from the tty
         tcflush(mfd, TCIOFLUSH);
 
         // Flash settings to the tty
+        tcsetattr(mfd, TCSANOW, &modopt );
+
+        for ( i = 0; i < MAX_INIT_ATTEMPT; i++ )
+        {
+            // Send an AT command for baud rate detection
+            write( mfd, "AT\r", 3 );
+
+            // Wait for read
+            if ( read( mfd, atbuf, 256 ) > 0 )
+            {
+                if ( strncmp( atbuf, "OK", 2 ) == 0 )
+                {
+                    printf( "Modem responded to AT command on attempt %d\n", i );
+                    break;
+                }
+            }
+        }
+
+        // Could not reach modem
+        if ( i == MAX_INIT_ATTEMPT )
+        {
+             close( mfd );
+             printf( "Modem %s non-responsive to AT commands\n", modbuf );
+             continue;
+        }
+
+        write( mfd, "ATZ\r", 4 );
+
+        // Set blocking
+        modopt.c_cc[VMIN] = 64;
+        // Re-flash settings
         tcsetattr(mfd, TCSANOW, &modopt );
 
         printf( "Intializing modem %s for baud %d\n", modbuf, baud_alias );

@@ -15,6 +15,7 @@
 
 #define MAX_MODEMS 8
 #define BAUDLIST_SIZE 8
+#define MAX_INIT_ATTEMPT 5
 
 #define TIMEOUT 5
 #define HOST_PORT 5001
