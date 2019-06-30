@@ -300,6 +300,8 @@ int configureModems( int * mods )
         // Attempt to intialize the modem
         for ( i = 0; i < MAX_INIT_ATTEMPT; i++ )
         {
+            printf( "Sending 'AT' to modem (attempt %d)... ", i );
+
             // Send an AT command for baud rate detection
             write( mfd, "AT\r", 3 );
 
@@ -312,16 +314,21 @@ int configureModems( int * mods )
                 // Recived an OK command
                 if ( strncmp( atbuf, "\nOK", 3 ) == 0 )
                 {
-                    printf( "Modem responded to AT command on attempt %d\n", i );
+                    printf( "responded 'OK'\n" );
                     break;
                 }
                 else
                 {
                     // Make the string printable
                     atbuf[atsize] = '\0';
-                    printf( "Unknown modem response: >>>%s<<<\n", atbuf );
+                    printf( "unknown response: >>>%s<<<\n", atbuf );
                     for ( int k = 0; k < atsize; k++ ) printf( "%2X", atbuf[k] & 0xFF );
+                    printf( "\n" );
                 }
+            }
+            else
+            {
+                printf( "no response\n" );
             }
         }
 
