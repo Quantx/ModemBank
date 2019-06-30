@@ -225,7 +225,7 @@ int configureModems( int * mods )
     modopt.c_cc[VMIN] = 0;
     modopt.c_cc[VTIME] = 10;
 
-    FILE * fd = fopen( "config/ports", "r" );
+    FILE * fd = fopen( "config/modems.csv", "r" );
 
     if ( fd == NULL )
     {

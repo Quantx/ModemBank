@@ -13,6 +13,8 @@
 
 #include <string.h>
 
+#define _POSIX_SOURCE 1
+
 #define MAX_MODEMS 8
 #define BAUDLIST_SIZE 8
 #define MAX_INIT_ATTEMPT 5
