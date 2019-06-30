@@ -214,21 +214,6 @@ int configureModems( int * mods )
     int mod_count = 0;
     struct termios modopt;
 
-    // Reset all fields
-    bzero(&modopt, sizeof(modopt));
-    // Defined parameters
-    modopt.c_iflag &= ~(IGNBRK | BRKINT | ICRNL | INLCR | PARMRK | INPCK | ISTRIP | IXON);
-
-    modopt.c_oflag &= ~(OCRNL | ONLCR | ONLRET | ONOCR | OFILL | OLCUC | OPOST);
-
-    modopt.c_cflag &= ~(CSIZE | PARENB);
-    modopt.c_cflag |= CS8;
-
-    modopt.c_lflag &= ~(ECHO | ECHONL | ICANON | IEXTEN | ISIG);
-    // Configure read timeout conditions
-    modopt.c_cc[VMIN] = 0;
-    modopt.c_cc[VTIME] = 10;
-
     FILE * fd = fopen( "config/modems.csv", "r" );
 
     if ( fd == NULL )
@@ -263,7 +248,7 @@ int configureModems( int * mods )
         // This isn't a serial port
         if ( !isatty(mfd) )
         {
-            printf( "Failed, %s is not a tty\n", modtok );
+            printf( "Failed, %s is not a TTY\n", modtok );
             close( mfd );
             continue;
         }
@@ -291,20 +276,42 @@ int configureModems( int * mods )
             continue;
         }
 
+        printf("1\n");
+
+        tcgetattr( mfd, &modopt );
+
+        printf("2\n");
+
+        modopt.c_iflag &= ~(IGNBRK | BRKINT | ICRNL | INLCR | PARMRK | INPCK | ISTRIP | IXON);
+
+        modopt.c_oflag &= ~(OCRNL | ONLCR | ONLRET | ONOCR | OFILL | OLCUC | OPOST);
+
+        modopt.c_cflag &= ~(CSIZE | PARENB);
+        modopt.c_cflag |= CS8;
+
+        modopt.c_lflag &= ~(ECHO | ECHONL | ICANON | IEXTEN | ISIG);
+
+        modopt.c_cc[VTIME] = 10;
+        modopt.c_cc[VMIN] = 0;
+
+        printf("3\n");
+
         // Configure baud rate
         cfsetispeed( &modopt, baudlist[baud_index] );
         cfsetospeed( &modopt, baudlist[baud_index] );
 
-        // Set non-blocking
-        modopt.c_cc[VMIN] = 0;
+        printf("4\n");
 
         // Flash settings to the tty after flushing
-        tcsetattr(mfd, TCSAFLUSH, &modopt );
+        tcsetattr( mfd, TCSAFLUSH, &modopt );
+
+        printf("5\n");
 
         // Attempt to intialize the modem
         for ( i = 0; i < MAX_INIT_ATTEMPT; i++ )
         {
             printf( "Sending 'AT' to modem (attempt %d)... ", i );
+            fflush(stdout);
 
             // Send an AT command for baud rate detection
             write( mfd, "AT\r", 3 );
@@ -350,7 +357,7 @@ int configureModems( int * mods )
         // Set blocking
         modopt.c_cc[VMIN] = 64;
         // Re-flash settings
-        tcsetattr(mfd, TCSANOW, &modopt );
+        tcsetattr( mfd, TCSANOW, &modopt );
 
         printf( "Intializing modem %s for baud %d\n", modbuf, baud_alias );
 
