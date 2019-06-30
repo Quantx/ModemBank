@@ -1,11 +1,16 @@
 #include "modembank.h"
 
+static volatile int isRunning = 1;
+
 const speed_t baudlist[BAUDLIST_SIZE] = { B300, B1200, B4800, B9600, B19200, B38400, B57600, B115200 };
 const int    baudalias[BAUDLIST_SIZE] = {  300,  1200,  4800,  9600,  19200,  38400,  57600,  115200 };
 
 int main( int argc, char * argv[] )
 {
-    int servsock, connsock, clilen;
+    // Setup cleanup code first
+    signal( SIGINT, sigHandler );
+
+    int servsock, connsock, clilen, i;
     struct sockaddr_in serv_addr, cli_addr;
 
     // Create socket
@@ -48,12 +53,11 @@ int main( int argc, char * argv[] )
     headconn.prev = headconn.next = &headconn;
 
     conn * icn; // For iterrating through conns
-    int i;
     int conn_count = 0; // Total number of conns
 
     printf( "Started terminal server on port: %d\n", HOST_PORT );
 
-    while (1)
+    while ( isRunning )
     {
         // The 1 is for the server socket
         int pfd_size = 1 + conn_count;
@@ -204,6 +208,11 @@ int main( int argc, char * argv[] )
         // We re-compute this list each time, so free it here
         free( pfds );
     }
+
+    // Close all modems
+    for ( i = 0; i < mod_count; i++ ) close( mods[i] );
+
+    printf( "Closed %d modems\n", i );
 }
 
 int configureModems( int * mods )
@@ -348,11 +357,12 @@ int configureModems( int * mods )
         write( mfd, "ATZ\r", 4 );
 
         // Set blocking
-        modopt.c_cc[VMIN] = 64;
+        modopt.c_cc[VTIME] = 0;
+        modopt.c_cc[VMIN] = 1;
         // Re-flash settings
         tcsetattr( mfd, TCSANOW, &modopt );
 
-        printf( "Intializing modem %s for baud %d\n", modbuf, baud_alias );
+        printf( "Intialized modem %s for baud %d\n", modbuf, baud_alias );
 
         // Save the modem file descriptor
         mods[mod_count] = mfd;
@@ -613,4 +623,11 @@ void commandLine( conn * mconn )
 void modemShell( conn * mconn )
 {
 
+}
+
+void sigHandler(int sig)
+{
+    isRunning = 0;
+    // Hide the CTRL+C
+    printf("\b\b  \b\b[Interrupt Signaled]\n");
 }

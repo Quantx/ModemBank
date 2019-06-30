@@ -4,6 +4,7 @@
 
 #include <time.h>
 #include <poll.h>
+#include <signal.h>
 
 #include <netdb.h>
 #include <netinet/in.h>
@@ -69,3 +70,4 @@ int telnetOptions(conn * mconn);
 void commandLine(conn * mconn);
 void modemShell(conn * mconn);
 int configureModems(int * mods);
+void sigHandler(int sig);
