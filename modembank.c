@@ -217,7 +217,7 @@ int configureModems( int * mods )
     // Reset all fields
     bzero(&modopt, sizeof(modopt));
     // Defined parameters
-    modopt.c_iflag = IGNPAR;
+    modopt.c_iflag = IGNPAR | IGNBRK;
     modopt.c_oflag = 0;
     modopt.c_cflag = CS8 | CLOCAL | CREAD;
     modopt.c_lflag = 0;
@@ -312,7 +312,7 @@ int configureModems( int * mods )
             if ( atsize > 0 )
             {
                 // Recived an OK command
-                if ( strncmp( atbuf, "\nOK", 3 ) == 0 )
+                if ( strncmp( atbuf, "OK\r", 3 ) == 0 )
                 {
                     printf( "responded 'OK'\n" );
                     break;
@@ -322,7 +322,7 @@ int configureModems( int * mods )
                     // Make the string printable
                     atbuf[atsize] = '\0';
                     printf( "unknown response: >>>%s<<<\n", atbuf );
-                    for ( int k = 0; k < atsize; k++ ) printf( "%2X", atbuf[k] & 0xFF );
+                    for ( int k = 0; k < atsize; k++ ) printf( "%02x|", atbuf[k] & 0xFF );
                     printf( "\n" );
                 }
             }
