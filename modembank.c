@@ -217,10 +217,14 @@ int configureModems( int * mods )
     // Reset all fields
     bzero(&modopt, sizeof(modopt));
     // Defined parameters
-    modopt.c_iflag = IGNPAR | IGNBRK;
-    modopt.c_oflag = 0;
-    modopt.c_cflag = CS8 | CLOCAL | CREAD;
-    modopt.c_lflag = 0;
+    modopt.c_iflag &= ~(IGNBRK | BRKINT | ICRNL | INLCR | PARMRK | INPCK | ISTRIP | IXON);
+
+    modopt.c_oflag &= ~(ECHO | ECHONL | ICANON | IEXTEN | ISIG);
+
+    modopt.c_cflag &= ~(CSIZE | PARENB);
+    modopt.c_cflag |= CS8;
+
+    modopt.c_lflag &= ~(ECHO | ECHONL | ICANON | IEXTEN | ISIG);
     // Configure read timeout conditions
     modopt.c_cc[VMIN] = 0;
     modopt.c_cc[VTIME] = 10;
