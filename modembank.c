@@ -276,12 +276,10 @@ int configureModems( int * mods )
             continue;
         }
 
-        printf("1\n");
-
+        // Get current config
         tcgetattr( mfd, &modopt );
 
-        printf("2\n");
-
+        // Update with new parameters
         modopt.c_iflag &= ~(IGNBRK | BRKINT | ICRNL | INLCR | PARMRK | INPCK | ISTRIP | IXON);
 
         modopt.c_oflag &= ~(OCRNL | ONLCR | ONLRET | ONOCR | OFILL | OLCUC | OPOST);
@@ -291,21 +289,16 @@ int configureModems( int * mods )
 
         modopt.c_lflag &= ~(ECHO | ECHONL | ICANON | IEXTEN | ISIG);
 
+        // Set 1 second timeout
         modopt.c_cc[VTIME] = 10;
         modopt.c_cc[VMIN] = 0;
-
-        printf("3\n");
 
         // Configure baud rate
         cfsetispeed( &modopt, baudlist[baud_index] );
         cfsetospeed( &modopt, baudlist[baud_index] );
 
-        printf("4\n");
-
         // Flash settings to the tty after flushing
         tcsetattr( mfd, TCSAFLUSH, &modopt );
-
-        printf("5\n");
 
         // Attempt to intialize the modem
         for ( i = 0; i < MAX_INIT_ATTEMPT; i++ )
@@ -323,7 +316,7 @@ int configureModems( int * mods )
             if ( atsize > 0 )
             {
                 // Recived an OK command
-                if ( strncmp( atbuf, "OK\r", 3 ) == 0 )
+                if ( strncmp( atbuf, "\r\nOK\r\n", 6 ) == 0 )
                 {
                     printf( "responded 'OK'\n" );
                     break;
