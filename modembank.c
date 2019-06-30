@@ -247,7 +247,7 @@ int configureModems( int * mods )
         if ( modtok == NULL ) continue;
 
         // Open the serial port
-        int mfd = open( modtok, O_RDWR | O_NOCTTY );
+        int mfd = open( modtok, O_RDWR );
 
         // Couldn't open port
         if ( mfd < 0 )
@@ -310,7 +310,7 @@ int configureModems( int * mods )
             if ( atsize > 0 )
             {
                 // Recived an OK command
-                if ( strncmp( atbuf, "OK", 2 ) == 0 )
+                if ( strncmp( atbuf, "\nOK", 3 ) == 0 )
                 {
                     printf( "Modem responded to AT command on attempt %d\n", i );
                     break;
