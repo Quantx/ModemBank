@@ -43,25 +43,34 @@ int main( int argc, char * argv[] )
     listen( servsock, 5 );
     clilen = sizeof(cli_addr);
 
-    // Configure serial ports for use with modems
-    int mods[MAX_MODEMS];
-    int mod_count = configureModems( mods );
+    printf( "Started terminal server on port: %d\n", HOST_PORT );
 
-    // Build the sentinel node
+    // Build the user sentinel node
+    user headuser;
+    headuser.flags = FLAG_SENT;
+    headuser.prev = headuser.next = &headuser;
+    // Number of users
+    int user_count = 0;
+
+    // Build the conn sentinel node
     conn headconn;
-    headconn.sentinel = 1;
+    headconn.flags = FLAG_SENT;
     headconn.prev = headconn.next = &headconn;
+    // Number of conns
+    int conn_count = 0;
+
+    // Configure serial modems
+    conn_count += configureModems( &headconn );
 
     conn * icn; // For iterrating through conns
-    int conn_count = 0; // Total number of conns
-
-    printf( "Started terminal server on port: %d\n", HOST_PORT );
+    user * iur; // For iterrating through users
 
     while ( isRunning )
     {
-        // The 1 is for the server socket
+        // The 1 is for the server's listening socket
         int pfd_size = 1 + conn_count;
 
+        // Store the fds of all conns
         struct pollfd * pfds = malloc( sizeof(struct pollfd) * pfd_size );
 
         // Configure server socket
@@ -72,23 +81,27 @@ int main( int argc, char * argv[] )
         // Add conn sockets to array
         for ( icn = headconn.next; icn != &headconn && i < pfd_size; (icn = icn->next),i++ )
         {
-            if ( icn->garbage )
+            if ( icn->flags & FLAG_GARB )
             {
                 printf( "Uncaught garbage conn\n" );
                 continue;
             }
 
-            pfds[i].fd = icn->sock;
+            pfds[i].fd = icn->fd;
             pfds[i].events = 0;
 
             // Can we read?
             if ( icn->buflen < BUFFER_LEN )
             {
-                pfds[i].events = POLLIN;
+                pfds[i].events |= POLLIN;
+            }
+            else
+            {
+                printf( "Conn has full buffer\n" );
             }
         }
 
-        printf( "Polling %d clients\n", i - 1 );
+        printf( "Polling %d buffers, %d users\n", i - 1, user_count );
 
         poll( pfds, pfd_size, TIMEOUT * 1000 );
 
@@ -102,34 +115,16 @@ int main( int argc, char * argv[] )
             }
             else
             {
-                printf( "New connection\n" );
+                printf( "New network connection\n" );
 
-                // Create struct
+                // Create a new connection
                 conn * newconn = malloc( sizeof(conn) );
 
-                // Set default username
-                strcpy( newconn->username, "Guest" );
-                // Save socket
-                newconn->sock = connsock;
-                // Empty buffer
+                // Initialize conn
+                newconn->flags = 0;
+                newconn->fd = connsock;
                 newconn->buflen = 0;
-                // Take note of current time
-                newconn->first = newconn->last = time(NULL);
-                // Set command line
-                newconn->cmdsec = 0;
-                newconn->cmdwnt = 20; // First prompt is username
-                newconn->cmdlen = 0;
-                newconn->cmdpos = 0;
-                // Set flags
-                newconn->sentinel = 0;
-                newconn->admin = 0;
-                newconn->garbage = 0;
-                // Default terminal size
-                newconn->width = 80;
-                newconn->height = 24;
 
-                // Flag this as a socket connection
-                newconn->network = 1;
                 // Transmit telnet init string
                 write( connsock, "\xFF\xFD\x22\xFF\xFB\x01\xFF\xFB\x03\xFF\xFD\x1F\xFF\xFD\x18", 15 );
 
@@ -144,6 +139,40 @@ int main( int argc, char * argv[] )
 
                 // Increment count
                 conn_count++;
+
+                // Create a new user session for this socket
+                user * newuser = malloc( sizeof(newuser) );
+
+                // Associate the new conn & user
+                newuser->stdin = newconn;
+                newuser->stdout = NULL;
+
+                // Set default username
+                strcpy( newuser->name, "guest" );
+                // Take note of current time
+                newuser->first = newuser->last = time(NULL);
+                // Set command line
+                newuser->cmdsec = 0;
+                newuser->cmdwnt = 20; // First prompt is username
+                newuser->cmdlen = 0;
+                newuser->cmdpos = 0;
+                // Default terminal size
+                newuser->width = 80;
+                newuser->height = 24;
+                // Default terminal name
+                strcpy( newuser->termtype, "unknown" );
+
+                // Set the position of our current node
+                newuser->prev = headuser.prev;
+                newuser->next = &headuser;
+
+                // Update the last node in the list to point to newuser
+                headuser.prev->next = newuser;
+                // Update sentinel node to point to newuser
+                headuser.prev = newuser;
+
+                // Increment count
+                user_count++;
             }
         }
 
@@ -153,29 +182,79 @@ int main( int argc, char * argv[] )
             if ( pfds[i].revents & POLLIN ) // Data to be read
             {
                 // Read in data
-                icn->buflen += read( icn->sock, icn->buf + icn->buflen, BUFFER_LEN - icn->buflen );
+                icn->buflen += read( icn->fd, icn->buf + icn->buflen, BUFFER_LEN - icn->buflen );
 
                 // Check for termination
                 if ( !icn->buflen )
                 {
-                    icn->garbage = 1;
+                    icn->flags |= FLAG_GARB;
+                    continue;
                 }
 
                 // Add end of string char
                 icn->buf[icn->buflen] = '\0';
+            }
+        }
 
-                // Up date last
-                icn->last = time(NULL);
+        // We re-compute this list each time, so free it now that we're done reading in
+        free( pfds );
+
+        // Handle user sessions
+        for ( iur = headuser.next; iur != &headuser; iur = iur-> next )
+        {
+            // Check if our input buffer is dead
+            if ( iur->stdin->flags & FLAG_GARB )
+            {
+                // This user is dead now too
+                iur->flags |= FLAG_GARB;
+                continue;
             }
 
-            // Check if we were sent telnet options
-            if ( icn->network ) telnetOptions( icn );
+            // If we're not a modem, decode Telnet options
+            if ( !(iur->stdin->flags & FLAG_MODM) )
+            {
+                telnetOptions( iur );
+            }
 
-            // Process command line
-            commandLine( icn );
+            // Check if we have a valid command
+            if ( iur->cmdwnt )
+            {
+                commandLine( iur );
+            }
+            else
+            {
+                commandShell( iur );
+            }
+        }
 
-            // Run the shell
-            modemShell( icn );
+        // User garbage collection
+        // Conn garbage collection
+        user * garbuser;
+        iur = headuser.next;
+        while ( iur != &headuser )
+        {
+            garbuser = iur;
+            iur = iur->next; // Gotta do this before we free the user
+
+            // Nothing to do here
+            if ( !(garbuser->flags & FLAG_GARB) ) continue;
+
+            // Make sure our input buffer gets cleaned up
+            garbuser->stdin->flags |= FLAG_GARB;
+            // Make suer our output buffer gets clean up if we have one
+            if ( garbuser->stdout != NULL ) garbuser->stdout->flags |= FLAG_GARB;
+
+            // Update node before us
+            garbuser->prev->next = garbuser->next;
+            // Update node after us
+            garbuser->next->prev = garbuser->prev;
+
+            printf("User '%s' disconnected\n", garbuser->name);
+
+            // Free user
+            free( garbuser );
+            // Decriment user count
+            user_count--;
         }
 
         // Conn garbage collection
@@ -186,36 +265,51 @@ int main( int argc, char * argv[] )
             garbconn = icn;
             icn = icn->next; // Gotta do this before we free the conn
 
-            if ( garbconn->garbage && !garbconn->sentinel )
+            // Nothing to do here
+            if ( !(garbconn->flags & FLAG_GARB) ) continue;
+
+            if ( garbconn->flags & FLAG_SENT )
+            {
+                // Sentinel nodes can't be garbage
+                garbconn->flags &= ~FLAG_GARB;
+            }
+            else if ( garbconn->flags & FLAG_MODM )
+            {
+                // TODO: Reset modem fully
+
+                // Finished reseting modem, mark it as not garbage, and available
+                garbconn->flags &= ~(FLAG_GARB | FLAG_CALL);
+            }
+            else
             {
                 // Update node before us
                 garbconn->prev->next = garbconn->next;
                 // Update node after us
                 garbconn->next->prev = garbconn->prev;
 
+                // Shutdown socket
+                shutdown( garbconn->fd, SHUT_RDWR );
                 // Ensure our socket is closed
-                close( garbconn->sock );
+                close( garbconn->fd );
+
+                printf("Terminated an %s disconnected\n", garbconn->flags & FLAG_OUTG ? "outgoing" : "incoming");
 
                 // Free the object
                 free( garbconn );
                 // Decrement count
                 conn_count--;
-
-                printf("Client disconnected\n");
             }
         }
-
-        // We re-compute this list each time, so free it here
-        free( pfds );
     }
 
-    // Close all modems
-    for ( i = 0; i < mod_count; i++ ) close( mods[i] );
-
-    printf( "Closed %d modems\n", i );
+    // Close everything
+    for ( icn = headconn.next; icn != &headconn; icn = icn->next )
+    {
+        close( icn->fd );
+    }
 }
 
-int configureModems( int * mods )
+int configureModems( conn * headconn )
 {
     printf( "Initializing modems...\n" );
 
@@ -299,7 +393,7 @@ int configureModems( int * mods )
         modopt.c_lflag &= ~(ECHO | ECHONL | ICANON | IEXTEN | ISIG);
 
         // Set 1 second timeout
-        modopt.c_cc[VTIME] = 10;
+        modopt.c_cc[VTIME] = INIT_DURATION * 10;
         modopt.c_cc[VMIN] = 0;
 
         // Configure baud rate
@@ -310,7 +404,7 @@ int configureModems( int * mods )
         tcsetattr( mfd, TCSAFLUSH, &modopt );
 
         // Attempt to intialize the modem
-        for ( i = 0; i < MAX_INIT_ATTEMPT; i++ )
+        for ( i = 0; i < INIT_ATTEMPTS; i++ )
         {
             printf( "Sending 'AT' to modem (attempt %d)... ", i );
             fflush(stdout);
@@ -346,7 +440,7 @@ int configureModems( int * mods )
         }
 
         // Could not reach modem
-        if ( i == MAX_INIT_ATTEMPT )
+        if ( i == INIT_ATTEMPTS )
         {
              close( mfd );
              printf( "Modem %s non-responsive to AT commands\n", modbuf );
@@ -364,8 +458,24 @@ int configureModems( int * mods )
 
         printf( "Intialized modem %s for baud %d\n", modbuf, baud_alias );
 
+        // Create a new conn
+        conn * newconn = malloc( sizeof(conn) );
+
+        // Save modem information
+        newconn->flags = FLAG_MODM;
+        newconn->fd = mfd;
+        newconn->buflen = 0;
+
+        // Set the position of our current node
+        newconn->prev = headconn->prev;
+        newconn->next = headconn;
+
+        // Update the last node in the list to point to newconn
+        headconn->prev->next = newconn;
+        // Update sentinel node to point to newconn
+        headconn->prev = newconn;
+
         // Save the modem file descriptor
-        mods[mod_count] = mfd;
         mod_count++;
     }
 
@@ -377,8 +487,11 @@ int configureModems( int * mods )
     return mod_count;
 }
 
-int telnetOptions( conn * mconn )
+int telnetOptions( user * muser )
 {
+    // Get our input buffer
+    conn * mconn = muser->stdin;
+
     if ( mconn->buflen <= 0 ) return 0;
 
     if ( mconn->buf[0] != '\xFF' ) return 0; // All options start with 0xFF
@@ -388,7 +501,11 @@ int telnetOptions( conn * mconn )
 
     printf( "Telnet options string:\n" );
 
-    for ( i = 0; i < mconn->buflen; i++ ) printf( "%02x|", mconn->buf[i] & 0xFF );
+    for ( i = 0; i < mconn->buflen; i++ )
+    {
+        printf( "%02x", mconn->buf[i] & 0xFF );
+        if ( i < mconn->buflen - 1 ) printf("|");
+    }
 
     printf( "\n" );
 
@@ -399,9 +516,9 @@ int telnetOptions( conn * mconn )
             switch ( ctok[2] ) // What type of option?
             {
                 case '\x1F': // Negotiate About Window Size (NAWS)
-                    mconn->width  = (ctok[3] << 8) + ctok[4];
-                    mconn->height = (ctok[5] << 8) + ctok[6];
-                    printf( "Set terminal size to: %d by %d\n", mconn->width, mconn->height );
+                    muser->width  = (ctok[3] << 8) + ctok[4];
+                    muser->height = (ctok[5] << 8) + ctok[6];
+                    printf( "Set terminal size to: %d by %d\n", muser->width, muser->height );
                     break;
                 case '\x18': // Terminal type
                     for ( i = 0; i < TERMTYPE_LEN && i + 4 + ctok < mconn->buf + mconn->buflen; i++ )
@@ -409,10 +526,10 @@ int telnetOptions( conn * mconn )
                         // End of negotiation
                         if ( ctok[i + 4] == '\xFF' && ctok[i + 5] == '\xF0' ) break;
                         // Copy char
-                        mconn->termtype[i] = ctok[i + 4];
+                        muser->termtype[i] = ctok[i + 4];
                     }
-                    mconn->termtype[i] = '\0';
-                    printf( "Set terminal type to: '%s'\n", mconn->termtype );
+                    muser->termtype[i] = '\0';
+                    printf( "Set terminal type to: '%s'\n", muser->termtype );
                     break;
             }
         }
@@ -422,7 +539,7 @@ int telnetOptions( conn * mconn )
             {
                 case '\x18': // Terminal type
                     // Request terminal name
-                    write( mconn->sock, "\xFF\xFA\x18\x01\xFF\xF0", 6 );
+                    write( mconn->fd, "\xFF\xFA\x18\x01\xFF\xF0", 6 );
                     break;
             }
         }
@@ -436,10 +553,13 @@ int telnetOptions( conn * mconn )
     return 1;
 }
 
-void commandLine( conn * mconn )
+void commandLine( user * muser )
 {
+    // Get our input buffer
+    conn * mconn = muser->stdin;
+
     // Nothing to do here
-    if ( mconn->buflen <= 0 || mconn->cmdwnt <= 0 ) return;
+    if ( mconn->buflen <= 0 || muser->cmdwnt <= 0 ) return;
 
     char acms[9]; // For sending ANSI CSI strings
     int i;
@@ -453,85 +573,85 @@ void commandLine( conn * mconn )
         if ( mconn->buf[0] >= 32 && mconn->buf[0] < 127 )
         {
             // Check if we have room in the command string
-            if ( mconn->cmdlen < mconn->cmdwnt && mconn->cmdlen < COMMAND_LEN )
+            if ( muser->cmdlen < muser->cmdwnt && muser->cmdlen < COMMAND_LEN )
             {
                 // Make room for character
-                for ( i = mconn->cmdlen; i > mconn->cmdpos; i-- )
+                for ( i = muser->cmdlen; i > muser->cmdpos; i-- )
                 {
-                    mconn->cmdbuf[i] = mconn->cmdbuf[i - 1];
+                    muser->cmdbuf[i] = muser->cmdbuf[i - 1];
                 }
 
                 // Insert character
-                mconn->cmdbuf[i] = mconn->buf[0];
+                muser->cmdbuf[i] = mconn->buf[0];
                 // Increase string length
-                mconn->cmdlen++;
+                muser->cmdlen++;
 
-                if ( !mconn->cmdsec )
+                if ( !muser->cmdsec )
                 {
                     // Reprint string
-                    write( mconn->sock, mconn->cmdbuf + mconn->cmdpos, mconn->cmdlen - mconn->cmdpos );
+                    write( mconn->fd, muser->cmdbuf + muser->cmdpos, muser->cmdlen - muser->cmdpos );
                     // Move cursor back to correct spot
-                    for ( i = mconn->cmdlen; i > mconn->cmdpos + 1; i-- ) write( mconn->sock, "\b", 1 );
+                    for ( i = muser->cmdlen; i > muser->cmdpos + 1; i-- ) write( mconn->fd, "\b", 1 );
                 }
                 // Advance cursor
-                mconn->cmdpos++;
+                muser->cmdpos++;
             }
             else
             {
                 // No room, ring their bell to let them know
-                write( mconn->sock, "\a", 1 );
+                write( mconn->fd, "\a", 1 );
             }
         }
         else if ( mconn->buf[0] == '\x0D' ) // Return character sent
         {
             // Add null byte
-            mconn->cmdbuf[mconn->cmdlen] = '\0';
+            muser->cmdbuf[muser->cmdlen] = '\0';
 
             // Reset internal vars
-            mconn->cmdlen = 0;
-            mconn->cmdpos = 0;
+            muser->cmdlen = 0;
+            muser->cmdpos = 0;
 
             // Indicate ready
-            mconn->cmdwnt = 0;
+            muser->cmdwnt = 0;
 
             // Send newline
-            write( mconn->sock, "\r\n", 2 );
+            write( mconn->fd, "\r\n", 2 );
 
             // Log command
-            if ( mconn->cmdsec )
+            if ( muser->cmdsec )
             {
                 printf( "New secure command\n" );
             }
             else
             {
-                printf( "New command: '%s'\n", mconn->cmdbuf );
+                printf( "New command: '%s'\n", muser->cmdbuf );
             }
         }
         else if ( mconn->buf[0] == '\b' || mconn->buf[0] == '\x7F' ) // Backspace character sent
         {
-            if ( mconn->cmdpos > 0 ) // Anything to delete?
+            if ( muser->cmdpos > 0 ) // Anything to delete?
             {
                 // Shift all characters left by one
-                for ( i = mconn->cmdpos; i < mconn->cmdlen; i++ )
+                for ( i = muser->cmdpos; i < muser->cmdlen; i++ )
                 {
-                    mconn->cmdbuf[i - 1] = mconn->cmdbuf[i];
+                    muser->cmdbuf[i - 1] = muser->cmdbuf[i];
                 }
 
                 // Decrease length of string
-                mconn->cmdlen--;
+                muser->cmdlen--;
 
                 // Move cursor
-                mconn->cmdpos--;
+                muser->cmdpos--;
 
-                if ( !mconn->cmdsec )
+                if ( !muser->cmdsec )
                 {
-                    write( mconn->sock, "\b", 1 );
+                    write( mconn->fd, "\b", 1 );
                     // Reprint string
-                    write( mconn->sock, mconn->cmdbuf + mconn->cmdpos, mconn->cmdlen - mconn->cmdpos );
+                    write( mconn->fd, muser->cmdbuf + muser->cmdpos, muser->cmdlen - muser->cmdpos );
                     // Add a space to cover up deleted char
-                    write( mconn->sock, " \b", 2 );
+                    write( mconn->fd, " \b", 2 );
                     // Move cursor back to correct spot
-                    for ( i = mconn->cmdlen; i > mconn->cmdpos; i-- ) write( mconn->sock, "\b", 1 );
+                    for ( i = muser->cmdlen; i > muser->cmdpos; i-- ) write( mconn->fd, "\b", 1 );
                 }
             }
         }
@@ -549,61 +669,61 @@ void commandLine( conn * mconn )
             case 'B': // Down arrow
                 break;
             case 'C': // Right arrow
-                if ( mconn->cmdpos < mconn->cmdlen )
+                if ( muser->cmdpos < muser->cmdlen )
                 {
                     // Move cursor to the right
-                    mconn->cmdpos++;
-                    if ( !mconn->cmdsec ) write( mconn->sock, "\e[C", 3 );
+                    muser->cmdpos++;
+                    if ( !muser->cmdsec ) write( mconn->fd, "\e[C", 3 );
                 }
                 break;
             case 'D': // Left arrow
-                if ( mconn->cmdpos > 0 )
+                if ( muser->cmdpos > 0 )
                 {
                     // Move cursor to the left
-                    mconn->cmdpos--;
-                    if ( !mconn->cmdsec ) write( mconn->sock, "\b", 1 );
+                    muser->cmdpos--;
+                    if ( !muser->cmdsec ) write( mconn->fd, "\b", 1 );
                 }
                 break;
             case 'H': // Home
-                if ( mconn->cmdpos > 0 )
+                if ( muser->cmdpos > 0 )
                 {
-                    mconn->cmdpos = 0;
-                    write( mconn->sock, "\r", 1 );
+                    muser->cmdpos = 0;
+                    write( mconn->fd, "\r", 1 );
                 }
                 break;
             case 'F': // End
-                if ( mconn->cmdpos > 0 )
+                if ( muser->cmdpos > 0 )
                 {
-                    if ( !mconn->cmdsec )
+                    if ( !muser->cmdsec )
                     {
                         // Compute ANSI CSI string
-                        sprintf( acms, "\e[%dC", mconn->cmdlen - mconn->cmdpos );
-                        write( mconn->sock, acms, strlen( acms ) );
+                        sprintf( acms, "\e[%dC", muser->cmdlen - muser->cmdpos );
+                        write( mconn->fd, acms, strlen( acms ) );
                     }
                     // Update cursor position
-                    mconn->cmdpos = mconn->cmdlen;
+                    muser->cmdpos = muser->cmdlen;
                 }
                 break;
             case '3': // Delete
-                if ( mconn->cmdpos < mconn->cmdlen )
+                if ( muser->cmdpos < muser->cmdlen )
                 {
                     // Shift all characters left by one
-                    for ( i = mconn->cmdpos; i < mconn->cmdlen - 1; i++ )
+                    for ( i = muser->cmdpos; i < muser->cmdlen - 1; i++ )
                     {
-                        mconn->cmdbuf[i] = mconn->cmdbuf[i + 1];
+                        muser->cmdbuf[i] = muser->cmdbuf[i + 1];
                     }
 
                     // Decrease length of string
-                    mconn->cmdlen--;
+                    muser->cmdlen--;
 
-                    if ( !mconn->cmdsec )
+                    if ( !muser->cmdsec )
                     {
                         // Reprint string
-                        write( mconn->sock, mconn->cmdbuf + mconn->cmdpos, mconn->cmdlen - mconn->cmdpos );
+                        write( mconn->fd, muser->cmdbuf + muser->cmdpos, muser->cmdlen - muser->cmdpos );
                         // Add a space to cover up deleted char
-                        write( mconn->sock, " \b", 2 );
+                        write( mconn->fd, " \b", 2 );
                         // Move cursor back to correct spot
-                        for ( i = mconn->cmdlen; i > mconn->cmdpos; i-- ) write( mconn->sock, "\b", 1 );
+                        for ( i = muser->cmdlen; i > muser->cmdpos; i-- ) write( mconn->fd, "\b", 1 );
                     }
                 }
                 break;
@@ -620,7 +740,7 @@ void commandLine( conn * mconn )
     mconn->buflen = 0;
 }
 
-void modemShell( conn * mconn )
+void commandShell( user * muser )
 {
 
 }

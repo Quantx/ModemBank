@@ -16,37 +16,65 @@
 
 #define _POSIX_SOURCE 1
 
-#define MAX_MODEMS 8
+// Modem constatns
 #define BAUDLIST_SIZE 8
-#define MAX_INIT_ATTEMPT 5
+#define INIT_ATTEMPTS 5
+#define INIT_DURATION 1
 
-#define TIMEOUT 5
+// Network constants
 #define HOST_PORT 5001
+
+// Modem & Network constatns
+#define TIMEOUT 5
 #define BUFFER_LEN 256
+
+// User constatns
 #define TERMTYPE_LEN 20
 #define USERNAME_LEN 20
 #define COMMAND_LEN 100
+
+// Linked-list flag constants
+#define FLAG_SENT (1 << 0) // Sentinel node
+#define FLAG_GARB (1 << 1) // Garbage node
+// User flag constants
+#define FLAG_ADMN (1 << 2) // User is admin
+#define FLAG_OPER (1 << 3) // User is oper
+// Conn flag constants
+#define FLAG_MODM (1 << 2) // Conn is a modem (else: socket)
+#define FLAG_OUTG (1 << 3) // Conn is outgoing
+#define FLAG_CALL (1 << 4) // Modem has an active connection (sockets don't use this)
 
 const speed_t baudlist[BAUDLIST_SIZE];
 const int baudalias[BAUDLIST_SIZE];
 
 typedef struct conn
 {
+    // Status flags
+    int flags;
+
     // Networking
-    int sock; // Stores the client socket fd
-    int network; // Boolean, true for socket, false for tty
+    int fd; // Stores the client socket fd
     char buf[BUFFER_LEN + 1]; // Stores incoming data from the socket
     int buflen; // Stores number of bytes in buf
-    int garbage; // Boolean, delete if true
+
+    // Linked list
+    struct conn * next; // Next conn in the linked list
+    struct conn * prev; // Prev conn in the linked list
+} conn;
+
+typedef struct user
+{
+    // Status flags
+    int flags;
+
+    struct conn * stdin; // Input conn
+    struct conn * stdout; // Output conn
 
     time_t first; // Unix time of initial connect
     time_t last; // Unix time of last char recived
 
     // Account
-    char username[USERNAME_LEN + 1]; // Username of the client
-    char usertemp[USERNAME_LEN + 1]; // Stores the login prompt username
-    char passtemp[65]; // Stores the login prompt password
-    int admin; // Boolean, is this user an admin?
+    char name[USERNAME_LEN + 1]; // Username of the client
 
     // Command Line
     char cmdbuf[COMMAND_LEN + 1]; // Stores the current command line
@@ -61,13 +89,12 @@ typedef struct conn
     char termtype[TERMTYPE_LEN + 1]; // Terminal type
 
     // Linked list
-    int sentinel; // This is a sentinel node
-    struct conn * next; // Next conn in the linked list
-    struct conn * prev; // Prev conn in the linked list
-} conn;
+    struct user * next; // Next user in the linked list
+    struct user * prev; // Prev user in the linked list
+} user;
 
-int telnetOptions(conn * mconn);
-void commandLine(conn * mconn);
-void modemShell(conn * mconn);
-int configureModems(int * mods);
+int telnetOptions(user * muser);
+void commandLine(user * muser);
+void commandShell(user * muser);
+int configureModems(conn * headconn);
 void sigHandler(int sig);
