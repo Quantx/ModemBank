@@ -320,6 +320,7 @@ int configureModems( int * mods )
                     // Make the string printable
                     atbuf[atsize] = '\0';
                     printf( "Unknown modem response: >>>%s<<<\n", atbuf );
+                    for ( int k = 0; k < atsize; k++ ) printf( "%2X", atbuf[k] & 0xFF );
                 }
             }
         }
