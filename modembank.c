@@ -219,7 +219,7 @@ int configureModems( int * mods )
     // Defined parameters
     modopt.c_iflag &= ~(IGNBRK | BRKINT | ICRNL | INLCR | PARMRK | INPCK | ISTRIP | IXON);
 
-    modopt.c_oflag &= ~(OCRNL | ONLCR | ONLRET | ONOCR | ONOEOT| OFILL | OLCUC | OPOST);
+    modopt.c_oflag &= ~(OCRNL | ONLCR | ONLRET | ONOCR | OFILL | OLCUC | OPOST);
 
     modopt.c_cflag &= ~(CSIZE | PARENB);
     modopt.c_cflag |= CS8;
