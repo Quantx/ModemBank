@@ -1,6 +1,6 @@
 #include "modembank.h"
 
-static volatile int isRunning = 1;
+static volatile int isRunning = 2;
 
 const speed_t baudlist[BAUDLIST_SIZE] = { B300, B1200, B4800, B9600, B19200, B38400, B57600, B115200 };
 const int    baudalias[BAUDLIST_SIZE] = {  300,  1200,  4800,  9600,  19200,  38400,  57600,  115200 };
@@ -65,8 +65,35 @@ int main( int argc, char * argv[] )
     conn * icn; // For iterrating through conns
     user * iur; // For iterrating through users
 
+    // Indicates that the program is about to enter the loop
+    isRunning = 1;
     while ( isRunning )
     {
+        // Check for new modem connections
+        for ( icn = headconn.next; icn != &headconn; icn = icn->next )
+        {
+            // Skip, not a modem
+            if ( !(icn->flags & FLAG_MODM) ) continue;
+
+            // Skip, modem reseting
+            if ( !(icn->flags & FLAG_GARB) ) continue;
+
+            // Skip, modem in use
+            if ( !(icn->flags & FLAG_CALL) ) continue;
+
+            // Flush the modem, keep the buffer empty
+            tcflush( icn->fd, TCIOFLUSH );
+
+            // Skip, no call
+            if ( !getDCD( icn ) ) continue;
+
+            // We need to start a new session
+            user_count += createSession( &headuser, icn );
+
+            // Mark modem as active
+            icn->flags |= FLAG_CALL;
+        }
+
         // The 1 is for the server's listening socket
         int pfd_size = 1 + conn_count;
 
@@ -101,7 +128,7 @@ int main( int argc, char * argv[] )
             }
         }
 
-        printf( "Polling %d buffers, %d users\n", i - 1, user_count );
+        printf( "Polling %d buffers, %d users\n", i, user_count );
 
         poll( pfds, pfd_size, TIMEOUT * 1000 );
 
@@ -140,39 +167,8 @@ int main( int argc, char * argv[] )
                 // Increment count
                 conn_count++;
 
-                // Create a new user session for this socket
-                user * newuser = malloc( sizeof(newuser) );
-
-                // Associate the new conn & user
-                newuser->stdin = newconn;
-                newuser->stdout = NULL;
-
-                // Set default username
-                strcpy( newuser->name, "guest" );
-                // Take note of current time
-                newuser->first = newuser->last = time(NULL);
-                // Set command line
-                newuser->cmdsec = 0;
-                newuser->cmdwnt = 20; // First prompt is username
-                newuser->cmdlen = 0;
-                newuser->cmdpos = 0;
-                // Default terminal size
-                newuser->width = 80;
-                newuser->height = 24;
-                // Default terminal name
-                strcpy( newuser->termtype, "unknown" );
-
-                // Set the position of our current node
-                newuser->prev = headuser.prev;
-                newuser->next = &headuser;
-
-                // Update the last node in the list to point to newuser
-                headuser.prev->next = newuser;
-                // Update sentinel node to point to newuser
-                headuser.prev = newuser;
-
                 // Increment count
-                user_count++;
+                user_count += createSession( &headuser, newconn );
             }
         }
 
@@ -182,17 +178,26 @@ int main( int argc, char * argv[] )
             if ( pfds[i].revents & POLLIN ) // Data to be read
             {
                 // Read in data
-                icn->buflen += read( icn->fd, icn->buf + icn->buflen, BUFFER_LEN - icn->buflen );
+                int ret = read( icn->fd, icn->buf + icn->buflen, BUFFER_LEN - icn->buflen );
 
                 // Check for termination
-                if ( !icn->buflen )
+                if ( ret < 0 )
                 {
-                    icn->flags |= FLAG_GARB;
-                    continue;
-                }
 
-                // Add end of string char
-                icn->buf[icn->buflen] = '\0';
+                }
+                else if ( !ret )
+                {
+                    // Flag as garbage
+                    icn->flags |= FLAG_GARB;
+                }
+                else
+                {
+                    // Update buffer length
+                    icn->buflen += ret;
+
+                    // Add end of string char
+                    icn->buf[icn->buflen] = '\0';
+                }
             }
         }
 
@@ -216,13 +221,21 @@ int main( int argc, char * argv[] )
                 telnetOptions( iur );
             }
 
-            // Check if we have a valid command
-            if ( iur->cmdwnt )
+            if ( iur->cmdwnt < 0 )
             {
+                // Get raw input
+                commandRaw( iur );
+            }
+            else if ( iur->cmdwnt > 0 )
+            {
+                // Assemble a command string
                 commandLine( iur );
             }
-            else
+            else if ( !iur->cmdwnt )
             {
+                // Nuke the backlog
+                iur->stdin->buflen = 0;
+                // Process the command
                 commandShell( iur );
             }
         }
@@ -268,18 +281,31 @@ int main( int argc, char * argv[] )
             // Nothing to do here
             if ( !(garbconn->flags & FLAG_GARB) ) continue;
 
+            // Deal with sentinels
             if ( garbconn->flags & FLAG_SENT )
             {
                 // Sentinel nodes can't be garbage
                 garbconn->flags &= ~FLAG_GARB;
             }
+            // Handle modems
             else if ( garbconn->flags & FLAG_MODM )
             {
-                // TODO: Reset modem fully
+                // Do we need to hangup?
+                if ( getDCD( garbconn ) )
+                {
+                    // Drop the Data Terminal Ready line to hangup
+                    setDTR( garbconn, 0 );
+                }
+                else
+                {
+                    // Tell the modem we're ready now
+                    setDTR( garbconn, 1 );
 
-                // Finished reseting modem, mark it as not garbage, and available
-                garbconn->flags &= ~(FLAG_GARB | FLAG_CALL);
+                    // Finished reseting modem, mark it as not garbage, and available
+                    garbconn->flags &= ~(FLAG_GARB | FLAG_CALL);
+                }
             }
+            // Handle socket
             else
             {
                 // Update node before us
@@ -309,6 +335,42 @@ int main( int argc, char * argv[] )
     }
 }
 
+int createSession( user * headuser, conn * newconn )
+{
+    // Create a new user session for this socket
+    user * newuser = malloc( sizeof(newuser) );
+
+    // Associate the new conn & user
+    newuser->stdin = newconn;
+    newuser->stdout = NULL;
+
+    // Set default username
+    strcpy( newuser->name, "guest" );
+    // Take note of current time
+    newuser->first = newuser->last = time(NULL);
+    // Set command line
+    newuser->cmdsec = 0;
+    newuser->cmdwnt = 20; // First prompt is username
+    newuser->cmdlen = 0;
+    newuser->cmdpos = 0;
+    // Default terminal size
+    newuser->width = 80;
+    newuser->height = 24;
+    // Default terminal name
+    strcpy( newuser->termtype, "unknown" );
+
+    // Set the position of our current node
+    newuser->prev = headuser->prev;
+    newuser->next = headuser;
+
+    // Update the last node in the list to point to newuser
+    headuser->prev->next = newuser;
+    // Update sentinel node to point to newuser
+    headuser->prev = newuser;
+
+    return 1;
+}
+
 int configureModems( conn * headconn )
 {
     printf( "Initializing modems...\n" );
@@ -335,9 +397,6 @@ int configureModems( conn * headconn )
         // Get the tty file to open
         modtok = strtok( modbuf, "," );
 
-        // No baud rate specified, skip this one
-        if ( modtok == NULL ) continue;
-
         // Open the serial port
         int mfd = open( modtok, O_RDWR );
 
@@ -358,6 +417,13 @@ int configureModems( conn * headconn )
 
         // Get the baud rate index
         modtok = strtok( NULL, "," );
+
+        // No baud rate specified, skip this one
+        if ( modtok == NULL )
+        {
+            printf( "Failed, no baud rate specified for %s\n", modbuf );
+            continue;
+        }
 
         // Convert to integer
         baud_alias = atoi( modtok );
@@ -382,14 +448,15 @@ int configureModems( conn * headconn )
         // Get current config
         tcgetattr( mfd, &modopt );
 
-        // Update with new parameters
+        // Un-set iFlag params
         modopt.c_iflag &= ~(IGNBRK | BRKINT | ICRNL | INLCR | PARMRK | INPCK | ISTRIP | IXON);
-
+        // Un-set oFlag params
         modopt.c_oflag &= ~(OCRNL | ONLCR | ONLRET | ONOCR | OFILL | OLCUC | OPOST);
-
-        modopt.c_cflag &= ~(CSIZE | PARENB);
-        modopt.c_cflag |= CS8;
-
+        // Un-set cFlag params
+        modopt.c_cflag &= ~(CSIZE | PARENB | CLOCAL);
+        // Set cFlag params
+        modopt.c_cflag |= (CS8 | CRTSCTS | CREAD);
+        // Un-set lFlag params
         modopt.c_lflag &= ~(ECHO | ECHONL | ICANON | IEXTEN | ISIG);
 
         // Set 1 second timeout
@@ -449,6 +516,18 @@ int configureModems( conn * headconn )
 
         // Send reset command to modem
         write( mfd, "ATZ\r", 4 );
+
+        // Get the optional, init string
+        modtok = strtok( NULL, "," );
+
+        // No baud rate specified, skip this one
+        if ( modtok != NULL )
+        {
+            // Transmit string
+            write( mfd, modtok, strlen(modtok) );
+            // Terminate string
+            write( mfd, "\r", 1 );
+        }
 
         // Set blocking
         modopt.c_cc[VTIME] = 0;
@@ -551,6 +630,19 @@ int telnetOptions( user * muser )
     mconn->buflen = 0;
 
     return 1;
+}
+
+void commandRaw( user * muser )
+{
+    conn * mconn = muser->stdin;
+
+    if ( mconn->buflen <= 0 || muser->cmdwnt >= 0 ) return;
+
+    // Convert request to positive length
+    int want = abs( muser->cmdwnt );
+
+    // Empty the buffer
+    mconn->buflen = 0;
 }
 
 void commandLine( user * muser )
@@ -747,7 +839,55 @@ void commandShell( user * muser )
 
 void sigHandler(int sig)
 {
-    isRunning = 0;
+    // Only soft exit if we're in the loop
+    if ( isRunning == 1 ) isRunning = 0;
+
     // Hide the CTRL+C
     printf("\b\b  \b\b[Interrupt Signaled]\n");
+
+    // We need to hard exit
+    if ( isRunning ) exit(0);
+}
+
+int getDCD( conn * mconn )
+{
+    // Not a modem
+    if ( !(mconn->flags & FLAG_MODM) ) return -1;
+
+    int status;
+
+    // Get status pins
+    ioctl( mconn->fd, TIOCMGET, &status );
+
+    // Return status of Data Carrier Detect
+    return status & TIOCM_CAR;
+}
+
+int setDTR( conn * mconn, int set )
+{
+    // Not a modem
+    if ( !(mconn->flags & FLAG_MODM) ) return -1;
+
+    int status;
+
+    // Get status pins
+    ioctl( mconn->fd, TIOCMGET, &status );
+
+    int result = status & TIOCM_DTR;
+
+    // Flip the bit
+    if ( set )
+    {
+        status |= TIOCM_DTR;
+    }
+    else
+    {
+        status &= ~TIOCM_DTR;
+    }
+
+    // Set status pins
+    ioctl( mconn->fd, TIOCMSET, &status );
+
+    // Return true if changed
+    return result != set;
 }
