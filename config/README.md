@@ -4,10 +4,10 @@ The `modems.csv` file contains a comma seperated list of modems to initialize.
 
 Format is as follows:
 ```
-/dev/tty0,300
-/dev/tty1,2400,AT&F1&R2%7=60
+/dev/ttyS0,300
+/dev/ttyS1,2400,AT&F1&R2%7=60
 ...
-/dev/tty43,19200
+/dev/ttyS10,19200
 ```
 Where the first entry points to a valid TTY and the second valid baud rate.
 Everything in the optional third entry (starting after the second comma) is sent to the modem as an initialization string.
