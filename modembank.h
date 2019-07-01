@@ -10,6 +10,7 @@
 #include <netinet/in.h>
 
 #include <termios.h>
+#include <sys/ioctl.h>
 #include <fcntl.h>
 
 #include <string.h>
@@ -42,7 +43,7 @@
 // Conn flag constants
 #define FLAG_MODM (1 << 2) // Conn is a modem (else: socket)
 #define FLAG_OUTG (1 << 3) // Conn is outgoing
-#define FLAG_CALL (1 << 4) // Modem has an active connection (sockets don't use this)
+#define FLAG_CALL (1 << 4) // Modem is currently connected
 
 const speed_t baudlist[BAUDLIST_SIZE];
 const int baudalias[BAUDLIST_SIZE];
@@ -56,6 +57,8 @@ typedef struct conn
     int fd; // Stores the client socket fd
     char buf[BUFFER_LEN + 1]; // Stores incoming data from the socket
     int buflen; // Stores number of bytes in buf
+
+    time_t hangup; // Used to drop DTR for call hangups
 
     // Linked list
     struct conn * next; // Next conn in the linked list
@@ -93,8 +96,16 @@ typedef struct user
     struct user * prev; // Prev user in the linked list
 } user;
 
+int configureModems(conn * headconn);
 int telnetOptions(user * muser);
+
+int createSession(user * headuser, conn * newconn);
+
+void commandRaw(user * muser);
 void commandLine(user * muser);
 void commandShell(user * muser);
-int configureModems(conn * headconn);
+
 void sigHandler(int sig);
+
+int setDTR(conn * mconn, int set);
+int getDCD(conn * mconn);
