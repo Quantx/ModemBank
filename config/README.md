@@ -1,6 +1,6 @@
 This directory contains all the needed configurations files needed for ModemBank to run.
 
-"modems.csv" contains a comma seperated list of modems to initialize.
+The `modems.csv` file contains a comma seperated list of modems to initialize.
 
 Format is as follows:
 ```
