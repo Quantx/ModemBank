@@ -2,8 +2,8 @@
 
 static volatile int isRunning = 2;
 
-const speed_t baudlist[BAUDLIST_SIZE] = { B300, B1200, B4800, B9600, B19200, B38400, B57600, B115200 };
-const int    baudalias[BAUDLIST_SIZE] = {  300,  1200,  4800,  9600,  19200,  38400,  57600,  115200 };
+const speed_t baud_list[ BAUDLIST_SIZE] = { B300, B1200, B4800, B9600, B19200, B38400, B57600, B115200 };
+const int     baud_alias[BAUDLIST_SIZE] = {  300,  1200,  4800,  9600,  19200,  38400,  57600,  115200 };
 
 int main( int argc, char * argv[] )
 {
@@ -25,7 +25,9 @@ int main( int argc, char * argv[] )
     // Reuse sockets
     int enable = 1;
     if (setsockopt(servsock, SOL_SOCKET, SO_REUSEADDR, &enable, sizeof(int)) < 0)
+    {
         perror("setsockopt(SO_REUSEADDR) failed");
+    }
 
     bzero((char *) &serv_addr, sizeof(serv_addr));
 
@@ -141,6 +143,7 @@ int main( int argc, char * argv[] )
 
         poll( pfds, pfd_size, TIMEOUT * 1000 );
 
+        // Accept new connections
         if ( pfds[0].revents & POLLIN )
         {
             connsock = accept(servsock, (struct sockaddr *) &cli_addr, &clilen);
@@ -217,7 +220,7 @@ int main( int argc, char * argv[] )
         for ( iur = headuser.next; iur != &headuser; iur = iur-> next )
         {
             // Check if our input buffer is dead
-            if ( iur->stdin->flags & FLAG_GARB )
+            if ( iur->stdin == NULL || iur->stdin->flags & FLAG_GARB )
             {
                 // This user is dead now too
                 iur->flags |= FLAG_GARB;
@@ -307,6 +310,8 @@ int main( int argc, char * argv[] )
                 }
                 else
                 {
+                    printf("Reset an %s modem\n", garbconn->flags & FLAG_OUTG ? "outgoing" : "incoming");
+
                     // Tell the modem we're ready now
                     setDTR( garbconn, 1 );
 
@@ -324,7 +329,7 @@ int main( int argc, char * argv[] )
 
                 // Shutdown socket
                 shutdown( garbconn->fd, SHUT_RDWR );
-                // Ensure our socket is closed
+                // Close socket
                 close( garbconn->fd );
 
                 printf("Terminated an %s disconnected\n", garbconn->flags & FLAG_OUTG ? "outgoing" : "incoming");
@@ -399,7 +404,7 @@ int configureModems( conn * headconn )
     char modbuf[256];
     char atbuf[256];
     char * modtok;
-    int baud_alias, baud_index;
+    int baud_value, baud_index;
 
     while ( fgets( modbuf, 256, fd ) != NULL )
     {
@@ -435,12 +440,12 @@ int configureModems( conn * headconn )
         }
 
         // Convert to integer
-        baud_alias = atoi( modtok );
+        baud_value = atoi( modtok );
         baud_index = -1;
 
         for ( i = 0; i < BAUDLIST_SIZE; i++ )
         {
-            if ( baud_alias == baudalias[i] )
+            if ( baud_value == baud_alias[i] )
             {
                 baud_index = i;
                 break;
@@ -449,7 +454,7 @@ int configureModems( conn * headconn )
 
         if ( baud_index < -1 )
         {
-            printf( "Failed, invalid baud rate %d for modem %s\n", baud_alias, modbuf );
+            printf( "Failed, invalid baud rate %d for modem %s\n", baud_value, modbuf );
             close( mfd );
             continue;
         }
@@ -473,8 +478,8 @@ int configureModems( conn * headconn )
         modopt.c_cc[VMIN] = 0;
 
         // Configure baud rate
-        cfsetispeed( &modopt, baudlist[baud_index] );
-        cfsetospeed( &modopt, baudlist[baud_index] );
+        cfsetispeed( &modopt, baud_list[baud_index] );
+        cfsetospeed( &modopt, baud_list[baud_index] );
 
         // Flash settings to the tty after flushing
         tcsetattr( mfd, TCSAFLUSH, &modopt );
@@ -544,7 +549,7 @@ int configureModems( conn * headconn )
         // Re-flash settings
         tcsetattr( mfd, TCSANOW, &modopt );
 
-        printf( "Intialized modem %s for baud %d\n", modbuf, baud_alias );
+        printf( "Intialized modem %s for baud %d\n", modbuf, baud_value );
 
         // Create a new conn
         conn * newconn = malloc( sizeof(conn) );
@@ -639,211 +644,6 @@ int telnetOptions( user * muser )
     mconn->buflen = 0;
 
     return 1;
-}
-
-void commandRaw( user * muser )
-{
-    conn * mconn = muser->stdin;
-
-    if ( mconn->buflen <= 0 || muser->cmdwnt >= 0 ) return;
-
-    // Convert request to positive length
-    int want = abs( muser->cmdwnt );
-
-    // Empty the buffer
-    mconn->buflen = 0;
-}
-
-void commandLine( user * muser )
-{
-    // Get our input buffer
-    conn * mconn = muser->stdin;
-
-    // Nothing to do here
-    if ( mconn->buflen <= 0 || muser->cmdwnt <= 0 ) return;
-
-    char acms[9]; // For sending ANSI CSI strings
-    int i;
-
-    // Fix a weird bug
-    if ( mconn->buf[0] == '\x0D' && mconn->buf[1] == '\0' ) mconn->buflen = 1;
-
-    if ( mconn->buflen == 1 ) // Standard ascii
-    {
-        // Check if this is printable ascii
-        if ( mconn->buf[0] >= 32 && mconn->buf[0] < 127 )
-        {
-            // Check if we have room in the command string
-            if ( muser->cmdlen < muser->cmdwnt && muser->cmdlen < COMMAND_LEN )
-            {
-                // Make room for character
-                for ( i = muser->cmdlen; i > muser->cmdpos; i-- )
-                {
-                    muser->cmdbuf[i] = muser->cmdbuf[i - 1];
-                }
-
-                // Insert character
-                muser->cmdbuf[i] = mconn->buf[0];
-                // Increase string length
-                muser->cmdlen++;
-
-                if ( !muser->cmdsec )
-                {
-                    // Reprint string
-                    write( mconn->fd, muser->cmdbuf + muser->cmdpos, muser->cmdlen - muser->cmdpos );
-                    // Move cursor back to correct spot
-                    for ( i = muser->cmdlen; i > muser->cmdpos + 1; i-- ) write( mconn->fd, "\b", 1 );
-                }
-                // Advance cursor
-                muser->cmdpos++;
-            }
-            else
-            {
-                // No room, ring their bell to let them know
-                write( mconn->fd, "\a", 1 );
-            }
-        }
-        else if ( mconn->buf[0] == '\x0D' ) // Return character sent
-        {
-            // Add null byte
-            muser->cmdbuf[muser->cmdlen] = '\0';
-
-            // Reset internal vars
-            muser->cmdlen = 0;
-            muser->cmdpos = 0;
-
-            // Indicate ready
-            muser->cmdwnt = 0;
-
-            // Send newline
-            write( mconn->fd, "\r\n", 2 );
-
-            // Log command
-            if ( muser->cmdsec )
-            {
-                printf( "New secure command\n" );
-            }
-            else
-            {
-                printf( "New command: '%s'\n", muser->cmdbuf );
-            }
-        }
-        else if ( mconn->buf[0] == '\b' || mconn->buf[0] == '\x7F' ) // Backspace character sent
-        {
-            if ( muser->cmdpos > 0 ) // Anything to delete?
-            {
-                // Shift all characters left by one
-                for ( i = muser->cmdpos; i < muser->cmdlen; i++ )
-                {
-                    muser->cmdbuf[i - 1] = muser->cmdbuf[i];
-                }
-
-                // Decrease length of string
-                muser->cmdlen--;
-
-                // Move cursor
-                muser->cmdpos--;
-
-                if ( !muser->cmdsec )
-                {
-                    write( mconn->fd, "\b", 1 );
-                    // Reprint string
-                    write( mconn->fd, muser->cmdbuf + muser->cmdpos, muser->cmdlen - muser->cmdpos );
-                    // Add a space to cover up deleted char
-                    write( mconn->fd, " \b", 2 );
-                    // Move cursor back to correct spot
-                    for ( i = muser->cmdlen; i > muser->cmdpos; i-- ) write( mconn->fd, "\b", 1 );
-                }
-            }
-        }
-        else
-        {
-            printf( "Got unknown ascii: %02x\n", mconn->buf[0] & 0xFF );
-        }
-    }
-    else if ( mconn->buf[0] == '\e' && mconn->buf[1] == '[' )// Extended control string (Arrow key, Home, etc.)
-    {
-        switch ( mconn->buf[2] ) // Check for arrow keys
-        {
-            case 'A': // Up arrow
-                break;
-            case 'B': // Down arrow
-                break;
-            case 'C': // Right arrow
-                if ( muser->cmdpos < muser->cmdlen )
-                {
-                    // Move cursor to the right
-                    muser->cmdpos++;
-                    if ( !muser->cmdsec ) write( mconn->fd, "\e[C", 3 );
-                }
-                break;
-            case 'D': // Left arrow
-                if ( muser->cmdpos > 0 )
-                {
-                    // Move cursor to the left
-                    muser->cmdpos--;
-                    if ( !muser->cmdsec ) write( mconn->fd, "\b", 1 );
-                }
-                break;
-            case 'H': // Home
-                if ( muser->cmdpos > 0 )
-                {
-                    muser->cmdpos = 0;
-                    write( mconn->fd, "\r", 1 );
-                }
-                break;
-            case 'F': // End
-                if ( muser->cmdpos > 0 )
-                {
-                    if ( !muser->cmdsec )
-                    {
-                        // Compute ANSI CSI string
-                        sprintf( acms, "\e[%dC", muser->cmdlen - muser->cmdpos );
-                        write( mconn->fd, acms, strlen( acms ) );
-                    }
-                    // Update cursor position
-                    muser->cmdpos = muser->cmdlen;
-                }
-                break;
-            case '3': // Delete
-                if ( muser->cmdpos < muser->cmdlen )
-                {
-                    // Shift all characters left by one
-                    for ( i = muser->cmdpos; i < muser->cmdlen - 1; i++ )
-                    {
-                        muser->cmdbuf[i] = muser->cmdbuf[i + 1];
-                    }
-
-                    // Decrease length of string
-                    muser->cmdlen--;
-
-                    if ( !muser->cmdsec )
-                    {
-                        // Reprint string
-                        write( mconn->fd, muser->cmdbuf + muser->cmdpos, muser->cmdlen - muser->cmdpos );
-                        // Add a space to cover up deleted char
-                        write( mconn->fd, " \b", 2 );
-                        // Move cursor back to correct spot
-                        for ( i = muser->cmdlen; i > muser->cmdpos; i-- ) write( mconn->fd, "\b", 1 );
-                    }
-                }
-                break;
-        }
-    }
-    else
-    {
-        printf( "Random string:\n" );
-        for ( i = 0; i < mconn->buflen; i++ )printf( "%02x|", mconn->buf[i] & 0xFF );
-        printf( "\n" );
-    }
-
-    // Empty the buffer
-    mconn->buflen = 0;
-}
-
-void commandShell( user * muser )
-{
-
 }
 
 void sigHandler(int sig)

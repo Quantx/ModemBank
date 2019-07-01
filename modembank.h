@@ -45,8 +45,8 @@
 #define FLAG_OUTG (1 << 3) // Conn is outgoing
 #define FLAG_CALL (1 << 4) // Modem is currently connected
 
-const speed_t baudlist[BAUDLIST_SIZE];
-const int baudalias[BAUDLIST_SIZE];
+const speed_t baud_list[ BAUDLIST_SIZE];
+const int     baud_alias[BAUDLIST_SIZE];
 
 typedef struct conn
 {
