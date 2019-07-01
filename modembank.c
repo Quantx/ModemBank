@@ -78,20 +78,30 @@ int main( int argc, char * argv[] )
             // Skip, modem reseting
             if ( !(icn->flags & FLAG_GARB) ) continue;
 
-            // Skip, modem in use
-            if ( !(icn->flags & FLAG_CALL) ) continue;
+            // Check for remote hangup
+            if ( icn->flags & FLAG_CALL )
+            {
+                // Skip, call in-progress
+                if ( getDCD( icn ) ) continue;
 
-            // Flush the modem, keep the buffer empty
-            tcflush( icn->fd, TCIOFLUSH );
+                // Reset modem
+                icn->flags |= FLAG_GARB;
+            }
+            // Check for incoming call
+            else
+            {
+                // Flush the modem, keep the buffer empty
+                tcflush( icn->fd, TCIOFLUSH );
 
-            // Skip, no call
-            if ( !getDCD( icn ) ) continue;
+                // Skip, no call
+                if ( !getDCD( icn ) ) continue;
 
-            // We need to start a new session
-            user_count += createSession( &headuser, icn );
+                // We need to start a new session
+                user_count += createSession( &headuser, icn );
 
-            // Mark modem as active
-            icn->flags |= FLAG_CALL;
+                // Mark modem as active
+                icn->flags |= FLAG_CALL;
+            }
         }
 
         // The 1 is for the server's listening socket
@@ -106,16 +116,15 @@ int main( int argc, char * argv[] )
 
         i = 1;
         // Add conn sockets to array
-        for ( icn = headconn.next; icn != &headconn && i < pfd_size; (icn = icn->next),i++ )
+        for ( icn = headconn.next; icn != &headconn && i < pfd_size; (icn = icn->next), i++ )
         {
-            if ( icn->flags & FLAG_GARB )
-            {
-                printf( "Uncaught garbage conn\n" );
-                continue;
-            }
-
             pfds[i].fd = icn->fd;
             pfds[i].events = 0;
+
+            // Skip garbage connection
+            if ( icn->flags & FLAG_GARB ) continue;
+            // Skip unconnected modems
+            if ( icn->flags & FLAG_MODM && !(icn->flags & FLAG_CALL) ) continue;
 
             // Can we read?
             if ( icn->buflen < BUFFER_LEN )
