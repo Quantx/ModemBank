@@ -106,7 +106,8 @@ void vylog(conn * mconn, const char * format, va_list args);
 void  zlog(const char * format, ...);
 void vzlog(const char * format, va_list args);
 
-int configureModems(conn * headconn);
+int loadModemConfig(conn * headconn);
+int configureModem(conn * headconn, const char * path, int baud, const char * magic);
 int telnetOptions(user * muser);
 
 int createSession(user * headuser, conn * newconn);
