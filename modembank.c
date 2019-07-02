@@ -45,7 +45,7 @@ int main( int argc, char * argv[] )
     listen( servsock, 5 );
     clilen = sizeof(cli_addr);
 
-    printf( "Started terminal server on port: %d\n", HOST_PORT );
+    zlog( "Started terminal server on port: %d\n", HOST_PORT );
 
     // Build the user sentinel node
     user headuser;
@@ -135,11 +135,11 @@ int main( int argc, char * argv[] )
             }
             else
             {
-                printf( "Conn has full buffer\n" );
+                ylog( icn, "Full buffer alarm!\n" );
             }
         }
 
-        printf( "Polling %d buffers, %d users\n", i, user_count );
+        zlog( "Polling %d buffers, %d users\n", i, user_count );
 
         poll( pfds, pfd_size, TIMEOUT * 1000 );
 
@@ -154,8 +154,6 @@ int main( int argc, char * argv[] )
             }
             else
             {
-                printf( "New network connection\n" );
-
                 // Create a new connection
                 conn * newconn = malloc( sizeof(conn) );
 
@@ -163,6 +161,9 @@ int main( int argc, char * argv[] )
                 newconn->flags = 0;
                 newconn->fd = connsock;
                 newconn->buflen = 0;
+
+                // Save the IP of the client
+                inet_ntop( AF_INET, &(cli_addr.sin_addr), newconn->name, CONNNAME_LEN );
 
                 // Transmit telnet init string
                 write( connsock, "\xFF\xFD\x22\xFF\xFB\x01\xFF\xFB\x03\xFF\xFD\x1F\xFF\xFD\x18", 15 );
@@ -274,7 +275,7 @@ int main( int argc, char * argv[] )
             // Update node after us
             garbuser->next->prev = garbuser->prev;
 
-            printf("User '%s' disconnected\n", garbuser->name);
+            xlog( garbuser, "User disconnected\n" );
 
             // Free user
             free( garbuser );
@@ -310,7 +311,7 @@ int main( int argc, char * argv[] )
                 }
                 else
                 {
-                    printf("Reset an %s modem\n", garbconn->flags & FLAG_OUTG ? "outgoing" : "incoming");
+                    ylog( garbconn, "Reset an %s modem\n", garbconn->flags & FLAG_OUTG ? "outgoing" : "incoming");
 
                     // Tell the modem we're ready now
                     setDTR( garbconn, 1 );
@@ -332,7 +333,7 @@ int main( int argc, char * argv[] )
                 // Close socket
                 close( garbconn->fd );
 
-                printf("Terminated an %s disconnected\n", garbconn->flags & FLAG_OUTG ? "outgoing" : "incoming");
+                ylog( garbconn, "Terminated an %s connection\n", garbconn->flags & FLAG_OUTG ? "outgoing" : "incoming");
 
                 // Free the object
                 free( garbconn );
@@ -342,11 +343,20 @@ int main( int argc, char * argv[] )
         }
     }
 
-    // Close everything
-    for ( icn = headconn.next; icn != &headconn; icn = icn->next )
+    // Close server listen socket
+    close( servsock );
+
+    i = 1;
+    // Close everything else
+    for ( icn = headconn.next; icn != &headconn; icn = icn->next, i++ )
     {
         close( icn->fd );
     }
+
+    zlog( "Closed %d connections\n", i );
+
+    // Must be last line
+    zlog( "ModemBank terminated successfully\n" );
 }
 
 int createSession( user * headuser, conn * newconn )
@@ -382,12 +392,14 @@ int createSession( user * headuser, conn * newconn )
     // Update sentinel node to point to newuser
     headuser->prev = newuser;
 
+    xlog( newuser, "New user connected\n" );
+
     return 1;
 }
 
 int configureModems( conn * headconn )
 {
-    printf( "Initializing modems...\n" );
+    zlog( "Initializing modems...\n" );
 
     int i;
     int mod_count = 0;
@@ -417,14 +429,14 @@ int configureModems( conn * headconn )
         // Couldn't open port
         if ( mfd < 0 )
         {
-            printf( "Failed to open modem %s\n", modtok );
+            zlog( "Failed to open modem %s\n", modtok );
             continue;
         }
 
         // This isn't a serial port
         if ( !isatty(mfd) )
         {
-            printf( "Failed, %s is not a TTY\n", modtok );
+            zlog( "Failed, %s is not a TTY\n", modtok );
             close( mfd );
             continue;
         }
@@ -435,7 +447,7 @@ int configureModems( conn * headconn )
         // No baud rate specified, skip this one
         if ( modtok == NULL )
         {
-            printf( "Failed, no baud rate specified for %s\n", modbuf );
+            zlog( "Failed, no baud rate specified for %s\n", modbuf );
             continue;
         }
 
@@ -454,7 +466,7 @@ int configureModems( conn * headconn )
 
         if ( baud_index < -1 )
         {
-            printf( "Failed, invalid baud rate %d for modem %s\n", baud_value, modbuf );
+            zlog( "Failed, invalid baud rate %d for modem %s\n", baud_value, modbuf );
             close( mfd );
             continue;
         }
@@ -469,7 +481,7 @@ int configureModems( conn * headconn )
         // Un-set cFlag params
         modopt.c_cflag &= ~(CSIZE | PARENB | CLOCAL);
         // Set cFlag params
-        modopt.c_cflag |= (CS8 | CRTSCTS | CREAD);
+        modopt.c_cflag |=  (CS8 | CRTSCTS | CREAD);
         // Un-set lFlag params
         modopt.c_lflag &= ~(ECHO | ECHONL | ICANON | IEXTEN | ISIG);
 
@@ -483,6 +495,8 @@ int configureModems( conn * headconn )
 
         // Flash settings to the tty after flushing
         tcsetattr( mfd, TCSAFLUSH, &modopt );
+
+        zlog( "Attempting to contact modem %s\n", modbuf );
 
         // Attempt to intialize the modem
         for ( i = 0; i < INIT_ATTEMPTS; i++ )
@@ -524,7 +538,7 @@ int configureModems( conn * headconn )
         if ( i == INIT_ATTEMPTS )
         {
              close( mfd );
-             printf( "Modem %s non-responsive to AT commands\n", modbuf );
+             zlog( "Modem %s non-responsive to AT commands\n", modbuf );
              continue;
         }
 
@@ -549,8 +563,6 @@ int configureModems( conn * headconn )
         // Re-flash settings
         tcsetattr( mfd, TCSANOW, &modopt );
 
-        printf( "Intialized modem %s for baud %d\n", modbuf, baud_value );
-
         // Create a new conn
         conn * newconn = malloc( sizeof(conn) );
 
@@ -558,6 +570,8 @@ int configureModems( conn * headconn )
         newconn->flags = FLAG_MODM;
         newconn->fd = mfd;
         newconn->buflen = 0;
+        // Store the name of this modem
+        strcpy( newconn->name, modbuf );
 
         // Set the position of our current node
         newconn->prev = headconn->prev;
@@ -570,12 +584,14 @@ int configureModems( conn * headconn )
 
         // Save the modem file descriptor
         mod_count++;
+
+        ylog( newconn, "Intialized at %d baud\n", baud_value );
     }
 
     // Remember to close the config file
     fclose( fd );
 
-    printf( "Initialized %d modems\n", mod_count );
+    zlog( "Initialized %d modems\n", mod_count );
 
     return mod_count;
 }
@@ -592,6 +608,7 @@ int telnetOptions( user * muser )
     int i;
     char * ctok = mconn->buf;
 
+    /*
     printf( "Telnet options string:\n" );
 
     for ( i = 0; i < mconn->buflen; i++ )
@@ -601,6 +618,7 @@ int telnetOptions( user * muser )
     }
 
     printf( "\n" );
+    */
 
     while ( ctok < mconn->buf + mconn->buflen )
     {
@@ -611,7 +629,7 @@ int telnetOptions( user * muser )
                 case '\x1F': // Negotiate About Window Size (NAWS)
                     muser->width  = (ctok[3] << 8) + ctok[4];
                     muser->height = (ctok[5] << 8) + ctok[6];
-                    printf( "Set terminal size to: %d by %d\n", muser->width, muser->height );
+                    xlog( muser, "Set terminal size to: %d by %d\n", muser->width, muser->height );
                     break;
                 case '\x18': // Terminal type
                     for ( i = 0; i < TERMTYPE_LEN && i + 4 + ctok < mconn->buf + mconn->buflen; i++ )
@@ -622,7 +640,7 @@ int telnetOptions( user * muser )
                         muser->termtype[i] = ctok[i + 4];
                     }
                     muser->termtype[i] = '\0';
-                    printf( "Set terminal type to: '%s'\n", muser->termtype );
+                    xlog( muser, "Set terminal type to: '%s'\n", muser->termtype );
                     break;
             }
         }
@@ -652,7 +670,9 @@ void sigHandler(int sig)
     if ( isRunning == 1 ) isRunning = 0;
 
     // Hide the CTRL+C
-    printf("\b\b  \b\b[Interrupt Signaled]\n");
+    printf("\b\b  \b\b");
+    // Print log message
+    zlog("*** Interrupt Signaled ***\n");
 
     // We need to hard exit
     if ( isRunning ) exit(0);
@@ -699,4 +719,77 @@ int setDTR( conn * mconn, int set )
 
     // Return true if changed
     return result != set;
+}
+
+void xlog( user * muser, const char * format, ... )
+{
+    va_list args;
+    va_start( args, format );
+    vxlog( muser, format, args );
+    va_end( args );
+}
+
+void vxlog( user * muser, const char * format, va_list args )
+{
+    char perms[6];
+
+    strcpy( perms, "USER" );
+
+    if ( muser->flags & FLAG_ADMN )
+    {
+        strcpy( perms, "ADMIN" );
+    }
+    else if ( muser->flags & FLAG_OPER )
+    {
+        strcpy( perms, "SYSOP" );
+    }
+
+    printf( "%s %s|", muser->name, perms );
+
+    vylog( muser->stdin, NULL, args );
+    vylog( muser->stdout, format, args );
+}
+
+void ylog( conn * mconn, const char * format, ... )
+{
+    va_list args;
+    va_start( args, format );
+    vylog( mconn, format, args );
+    va_end( args );
+}
+
+void vylog( conn * mconn, const char * format, va_list args )
+{
+    if ( mconn != NULL )
+    {
+        printf( "%s %s|", mconn->name, mconn->flags & FLAG_OUTG ? "OUT" : "IN" );
+    }
+
+    vzlog( format, args );
+}
+
+void zlog( const char * format, ... )
+{
+    va_list args;
+    va_start( args, format );
+    vzlog( format, args );
+    va_end( args );
+}
+
+void vzlog( const char * format, va_list args )
+{
+    // Nothing was passed to us
+    if ( format == NULL ) return;
+
+    time_t rightNow;
+    time( &rightNow );
+
+    char timebuf[80];
+    strftime( timebuf, 80, "%x %X", localtime( &rightNow ) );
+
+    // Print out our debug info
+    printf( "%s|", timebuf );
+
+    // Print out user message
+    vprintf( format, args );
 }
