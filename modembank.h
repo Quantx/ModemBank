@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdarg.h>
 #include <unistd.h>
 
 #include <time.h>
@@ -8,6 +9,7 @@
 
 #include <netdb.h>
 #include <netinet/in.h>
+#include <arpa/inet.h>
 
 #include <termios.h>
 #include <sys/ioctl.h>
@@ -28,6 +30,7 @@
 // Modem & Network constatns
 #define TIMEOUT 5
 #define BUFFER_LEN 256
+#define CONNNAME_LEN 20
 
 // User constatns
 #define TERMTYPE_LEN 20
@@ -58,7 +61,7 @@ typedef struct conn
     char buf[BUFFER_LEN + 1]; // Stores incoming data from the socket
     int buflen; // Stores number of bytes in buf
 
-    time_t hangup; // Used to drop DTR for call hangups
+    char name[CONNNAME_LEN + 1]; // A printable identifier for the conn
 
     // Linked list
     struct conn * next; // Next conn in the linked list
@@ -95,6 +98,13 @@ typedef struct user
     struct user * next; // Next user in the linked list
     struct user * prev; // Prev user in the linked list
 } user;
+
+void  xlog(user * muser, const char * format, ...);
+void vxlog(user * muser, const char * format, va_list args);
+void  ylog(conn * mconn, const char * format, ...);
+void vylog(conn * mconn, const char * format, va_list args);
+void  zlog(const char * format, ...);
+void vzlog(const char * format, va_list args);
 
 int configureModems(conn * headconn);
 int telnetOptions(user * muser);
