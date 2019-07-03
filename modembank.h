@@ -61,7 +61,7 @@ typedef struct conn
     // Origin of the conn
     union {
         char path[15]; // Path to the modem
-        struct sockaddr_in addr; // IP address of the socket
+        struct sockaddr_in addr; // IP & Port of the socket
     } org;
 
     // Linked list
