@@ -58,6 +58,12 @@ typedef struct conn
 
     char name[CONNNAME_LEN + 1]; // A printable identifier for the conn
 
+    // Origin of the conn
+    union {
+        char path[15];
+        struct sockaddr_in addr;
+    } org;
+
     // Linked list
     struct conn * next; // Next conn in the linked list
 } conn;

@@ -154,9 +154,10 @@ int main( int argc, char * argv[] )
                 newconn->flags = 0;
                 newconn->fd = connsock;
                 newconn->buflen = 0;
+                newconn->org.addr = cli_addr;
 
                 // Save the IP of the client
-                inet_ntop( AF_INET, &(cli_addr.sin_addr), newconn->name, CONNNAME_LEN );
+                inet_ntop( AF_INET, &(newconn->org.addr.sin_addr), newconn->name, CONNNAME_LEN );
 
                 // Transmit telnet init string
                 write( connsock, "\xFF\xFD\x22\xFF\xFB\x01\xFF\xFB\x03\xFF\xFD\x1F\xFF\xFD\x18", 15 );
