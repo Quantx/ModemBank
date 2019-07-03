@@ -185,8 +185,10 @@ int configureModem( conn ** headconn, const char * path, int baud, const char * 
     newconn->flags = FLAG_MODM;
     newconn->fd = mfd;
     newconn->buflen = 0;
+    // Store the path to this modem
+    strcpy( newconn->org.path, path );
     // Store the name of this modem
-    strcpy( newconn->name, path );
+    strcpy( newconn->name, "Temp Modem" );
 
     // Insert node
     newconn->next = *headconn;
