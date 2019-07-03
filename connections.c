@@ -3,7 +3,7 @@
 const speed_t baud_list[ BAUDLIST_SIZE] = { B300, B1200, B4800, B9600, B19200, B38400, B57600, B115200 };
 const int     baud_alias[BAUDLIST_SIZE] = {  300,  1200,  4800,  9600,  19200,  38400,  57600,  115200 };
 
-int loadModemConfig( conn * headconn )
+int loadModemConfig( conn ** headconn )
 {
     char modbuf[256];
     char * path, * magic;
@@ -52,7 +52,7 @@ int loadModemConfig( conn * headconn )
 }
 
 
-int configureModem( conn * headconn, const char * path, int baud, const char * magic )
+int configureModem( conn ** headconn, const char * path, int baud, const char * magic )
 {
     struct termios modopt;
     char atbuf[256];
@@ -188,14 +188,9 @@ int configureModem( conn * headconn, const char * path, int baud, const char * m
     // Store the name of this modem
     strcpy( newconn->name, path );
 
-    // Set the position of our current node
-    newconn->prev = headconn->prev;
-    newconn->next = headconn;
-
-    // Update the last node in the list to point to newconn
-    headconn->prev->next = newconn;
-    // Update sentinel node to point to newconn
-    headconn->prev = newconn;
+    // Insert node
+    newconn->next = *headconn;
+    *headconn = newconn;
 
     ylog( newconn, "Intialized at %d baud\n", baud );
 
@@ -311,4 +306,74 @@ int setDTR( conn * mconn, int set )
 
     // Return true if changed
     return result != set;
+}
+
+int connGarbage( conn ** headconn )
+{
+    conn * icn, * nextconn, * prevconn = NULL;
+    int conn_count = 0;
+
+    for ( icn = *headconn; icn != NULL; icn = nextconn )
+    {
+        // Save this for later
+        nextconn = icn->next;
+
+        // Nothing to do here
+        if ( !(icn->flags & FLAG_GARB) )
+        {
+            /*** Intentionally left empty ***/
+        }
+        // Handle modems
+        else if ( icn->flags & FLAG_MODM )
+        {
+            // Do we need to hangup?
+            if ( getDCD( icn ) )
+            {
+                // Drop the Data Terminal Ready line to hangup
+                setDTR( icn, 0 );
+            }
+            else
+            {
+                ylog( icn, "Reset an %s modem\n", icn->flags & FLAG_OUTG ? "outgoing" : "incoming");
+
+                // Tell the modem we're ready now
+                setDTR( icn, 1 );
+
+                // Finished reseting modem, mark it as not garbage, and available
+                icn->flags &= ~(FLAG_GARB | FLAG_CALL);
+            }
+        }
+        else
+        {
+            // Shutdown socket
+            shutdown( icn->fd, SHUT_RDWR );
+            // Close socket
+            close( icn->fd );
+
+            ylog( icn, "Terminated an %s connection\n", icn->flags & FLAG_OUTG ? "outgoing" : "incoming");
+
+            // Check if we're the head
+            if ( prevconn == NULL )
+            {
+                *headconn = icn->next;
+            }
+            else
+            {
+                prevconn->next = icn->next;
+            }
+
+            // Free the node
+            free( icn );
+
+            // Decrement count
+            conn_count++;
+
+            // Don't update prevconn
+            continue;
+        }
+
+        prevconn = icn;
+    }
+
+    return conn_count;
 }

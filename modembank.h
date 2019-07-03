@@ -20,7 +20,6 @@
 #define _POSIX_SOURCE 1
 
 // Modem constatns
-#define BAUDLIST_SIZE 8
 #define INIT_ATTEMPTS 5
 #define INIT_DURATION 1
 
@@ -38,18 +37,14 @@
 #define COMMAND_LEN 100
 
 // Linked-list flag constants
-#define FLAG_SENT (1 << 0) // Sentinel node
-#define FLAG_GARB (1 << 1) // Garbage node
+#define FLAG_GARB (1 << 0) // Garbage node
 // User flag constants
-#define FLAG_ADMN (1 << 2) // User is admin
-#define FLAG_OPER (1 << 3) // User is oper
+#define FLAG_ADMN (1 << 1) // User is admin
+#define FLAG_OPER (1 << 2) // User is oper
 // Conn flag constants
-#define FLAG_MODM (1 << 2) // Conn is a modem (else: socket)
-#define FLAG_OUTG (1 << 3) // Conn is outgoing
-#define FLAG_CALL (1 << 4) // Modem is currently connected
-
-const speed_t baud_list[ BAUDLIST_SIZE];
-const int     baud_alias[BAUDLIST_SIZE];
+#define FLAG_MODM (1 << 1) // Conn is a modem (else: socket)
+#define FLAG_OUTG (1 << 2) // Conn is outgoing
+#define FLAG_CALL (1 << 3) // Modem is currently connected
 
 typedef struct conn
 {
@@ -65,7 +60,6 @@ typedef struct conn
 
     // Linked list
     struct conn * next; // Next conn in the linked list
-    struct conn * prev; // Prev conn in the linked list
 } conn;
 
 typedef struct user
@@ -96,7 +90,6 @@ typedef struct user
 
     // Linked list
     struct user * next; // Next user in the linked list
-    struct user * prev; // Prev user in the linked list
 } user;
 
 void  xlog(user * muser, const char * format, ...);
@@ -106,17 +99,10 @@ void vylog(conn * mconn, const char * format, va_list args);
 void  zlog(const char * format, ...);
 void vzlog(const char * format, va_list args);
 
-int loadModemConfig(conn * headconn);
-int configureModem(conn * headconn, const char * path, int baud, const char * magic);
-int telnetOptions(user * muser);
-
-int createSession(user * headuser, conn * newconn);
-
-void commandRaw(user * muser);
-void commandLine(user * muser);
-void commandShell(user * muser);
+int createSession(user ** headuser, conn * newconn);
 
 void sigHandler(int sig);
 
-int setDTR(conn * mconn, int set);
-int getDCD(conn * mconn);
+#include "connections.h"
+#include "shell.h"
+#include "commands.h"

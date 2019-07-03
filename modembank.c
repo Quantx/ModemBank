@@ -45,16 +45,12 @@ int main( int argc, char * argv[] )
     zlog( "Started terminal server on port: %d\n", HOST_PORT );
 
     // Build the user sentinel node
-    user headuser;
-    headuser.flags = FLAG_SENT;
-    headuser.prev = headuser.next = &headuser;
+    user * headuser = NULL;
     // Number of users
     int user_count = 0;
 
     // Build the conn sentinel node
-    conn headconn;
-    headconn.flags = FLAG_SENT;
-    headconn.prev = headconn.next = &headconn;
+    conn * headconn = NULL;
     // Number of conns
     int conn_count = 0;
 
@@ -69,7 +65,7 @@ int main( int argc, char * argv[] )
     while ( isRunning )
     {
         // Check for new modem connections
-        for ( icn = headconn.next; icn != &headconn; icn = icn->next )
+        for ( icn = headconn; icn != NULL; icn = icn->next )
         {
             // Skip, not a modem
             if ( !(icn->flags & FLAG_MODM) ) continue;
@@ -115,7 +111,7 @@ int main( int argc, char * argv[] )
 
         i = 1;
         // Add conn sockets to array
-        for ( icn = headconn.next; icn != &headconn && i < pfd_size; (icn = icn->next), i++ )
+        for ( icn = headconn; icn != NULL && i < pfd_size; (icn = icn->next), i++ )
         {
             pfds[i].fd = icn->fd;
             pfds[i].events = 0;
@@ -165,14 +161,9 @@ int main( int argc, char * argv[] )
                 // Transmit telnet init string
                 write( connsock, "\xFF\xFD\x22\xFF\xFB\x01\xFF\xFB\x03\xFF\xFD\x1F\xFF\xFD\x18", 15 );
 
-                // Set the position of our current node
-                newconn->prev = headconn.prev;
-                newconn->next = &headconn;
-
-                // Update the last node in the list to point to newconn
-                headconn.prev->next = newconn;
-                // Update sentinel node to point to newconn
-                headconn.prev = newconn;
+                // Insert node
+                newconn->next = headconn;
+                headconn = newconn;
 
                 // Increment count
                 conn_count++;
@@ -183,7 +174,7 @@ int main( int argc, char * argv[] )
         }
 
         i = 1;
-        for ( icn=headconn.next; icn != &headconn && i < pfd_size; (icn = icn->next),i++ )
+        for ( icn = headconn; icn != NULL && i < pfd_size; (icn = icn->next),i++ )
         {
             if ( pfds[i].revents & POLLIN ) // Data to be read
             {
@@ -215,7 +206,7 @@ int main( int argc, char * argv[] )
         free( pfds );
 
         // Handle user sessions
-        for ( iur = headuser.next; iur != &headuser; iur = iur-> next )
+        for ( iur = headuser; iur != NULL; iur = iur->next )
         {
             // Check if our input buffer is dead
             if ( iur->stdin == NULL || iur->stdin->flags & FLAG_GARB )
@@ -234,110 +225,62 @@ int main( int argc, char * argv[] )
             if ( iur->cmdwnt < 0 )
             {
                 // Get raw input
-                commandRaw( iur );
+                terminalRaw( iur );
             }
             else if ( iur->cmdwnt > 0 )
             {
                 // Assemble a command string
-                commandLine( iur );
+                terminalLine( iur );
             }
             else if ( !iur->cmdwnt )
             {
                 // Nuke the backlog
                 iur->stdin->buflen = 0;
                 // Process the command
-                commandShell( iur );
+                terminalShell( iur );
             }
         }
 
         // User garbage collection
-        // Conn garbage collection
-        user * garbuser;
-        iur = headuser.next;
-        while ( iur != &headuser )
+        user * prevuser = NULL;
+        user * nextuser = NULL;
+        for ( iur = headuser; iur != NULL; iur = nextuser )
         {
-            garbuser = iur;
-            iur = iur->next; // Gotta do this before we free the user
+            // Keep a copy of this pointer
+            nextuser = iur->next;
 
-            // Nothing to do here
-            if ( !(garbuser->flags & FLAG_GARB) ) continue;
+            // Make sure this user is garbage
+            if ( !(iur->flags & FLAG_GARB) )
+            {
+                prevuser = iur;
+                continue;
+            }
 
             // Make sure our input buffer gets cleaned up
-            garbuser->stdin->flags |= FLAG_GARB;
-            // Make suer our output buffer gets clean up if we have one
-            if ( garbuser->stdout != NULL ) garbuser->stdout->flags |= FLAG_GARB;
+            iur->stdin->flags |= FLAG_GARB;
+            // Make sure our output buffer gets clean up if we have one
+            if ( iur->stdout != NULL ) iur->stdout->flags |= FLAG_GARB;
 
-            // Update node before us
-            garbuser->prev->next = garbuser->next;
-            // Update node after us
-            garbuser->next->prev = garbuser->prev;
+            xlog( iur, "User disconnected\n" );
 
-            xlog( garbuser, "User disconnected\n" );
+            // Check if we're head
+            if ( prevuser == NULL )
+            {
+                headuser = iur->next;
+            }
+            else
+            {
+                prevuser->next = iur->next;
+            }
 
             // Free user
-            free( garbuser );
+            free( iur );
             // Decriment user count
             user_count--;
         }
 
-        // Conn garbage collection
-        conn * garbconn;
-        icn = headconn.next;
-        while ( icn != &headconn )
-        {
-            garbconn = icn;
-            icn = icn->next; // Gotta do this before we free the conn
-
-            // Nothing to do here
-            if ( !(garbconn->flags & FLAG_GARB) ) continue;
-
-            // Deal with sentinels
-            if ( garbconn->flags & FLAG_SENT )
-            {
-                // Sentinel nodes can't be garbage
-                garbconn->flags &= ~FLAG_GARB;
-            }
-            // Handle modems
-            else if ( garbconn->flags & FLAG_MODM )
-            {
-                // Do we need to hangup?
-                if ( getDCD( garbconn ) )
-                {
-                    // Drop the Data Terminal Ready line to hangup
-                    setDTR( garbconn, 0 );
-                }
-                else
-                {
-                    ylog( garbconn, "Reset an %s modem\n", garbconn->flags & FLAG_OUTG ? "outgoing" : "incoming");
-
-                    // Tell the modem we're ready now
-                    setDTR( garbconn, 1 );
-
-                    // Finished reseting modem, mark it as not garbage, and available
-                    garbconn->flags &= ~(FLAG_GARB | FLAG_CALL);
-                }
-            }
-            // Handle socket
-            else
-            {
-                // Update node before us
-                garbconn->prev->next = garbconn->next;
-                // Update node after us
-                garbconn->next->prev = garbconn->prev;
-
-                // Shutdown socket
-                shutdown( garbconn->fd, SHUT_RDWR );
-                // Close socket
-                close( garbconn->fd );
-
-                ylog( garbconn, "Terminated an %s connection\n", garbconn->flags & FLAG_OUTG ? "outgoing" : "incoming");
-
-                // Free the object
-                free( garbconn );
-                // Decrement count
-                conn_count--;
-            }
-        }
+        // Cleanup dead conns
+        conn_count -= connGarbage( &headconn );
     }
 
     // Close server listen socket
@@ -345,7 +288,7 @@ int main( int argc, char * argv[] )
 
     i = 1;
     // Close everything else
-    for ( icn = headconn.next; icn != &headconn; icn = icn->next, i++ )
+    for ( icn = headconn; icn != NULL; (icn = icn->next), i++ )
     {
         close( icn->fd );
     }
@@ -356,7 +299,7 @@ int main( int argc, char * argv[] )
     zlog( "ModemBank terminated successfully\n" );
 }
 
-int createSession( user * headuser, conn * newconn )
+int createSession( user ** headuser, conn * newconn )
 {
     // Create a new user session for this socket
     user * newuser = malloc( sizeof(newuser) );
@@ -380,14 +323,9 @@ int createSession( user * headuser, conn * newconn )
     // Default terminal name
     strcpy( newuser->termtype, "unknown" );
 
-    // Set the position of our current node
-    newuser->prev = headuser->prev;
-    newuser->next = headuser;
-
-    // Update the last node in the list to point to newuser
-    headuser->prev->next = newuser;
-    // Update sentinel node to point to newuser
-    headuser->prev = newuser;
+    // Insert node
+    newuser->next = *headuser;
+    *headuser = newuser;
 
     xlog( newuser, "New user connected\n" );
 
@@ -410,6 +348,8 @@ void sigHandler(int sig)
 
 void xlog( user * muser, const char * format, ... )
 {
+    printf( "[" );
+
     va_list args;
     va_start( args, format );
     vxlog( muser, format, args );
@@ -439,6 +379,8 @@ void vxlog( user * muser, const char * format, va_list args )
 
 void ylog( conn * mconn, const char * format, ... )
 {
+    printf( "[" );
+
     va_list args;
     va_start( args, format );
     vylog( mconn, format, args );
@@ -457,6 +399,8 @@ void vylog( conn * mconn, const char * format, va_list args )
 
 void zlog( const char * format, ... )
 {
+    printf( "[" );
+
     va_list args;
     va_start( args, format );
     vzlog( format, args );
@@ -475,7 +419,7 @@ void vzlog( const char * format, va_list args )
     strftime( timebuf, 80, "%x %X", localtime( &rightNow ) );
 
     // Print out our debug info
-    printf( "%s|", timebuf );
+    printf( "%s]", timebuf );
 
     // Print out user message
     vprintf( format, args );

@@ -1,6 +1,6 @@
 #include "modembank.h"
 
-void commandRaw( user * muser )
+void terminalRaw( user * muser )
 {
     conn * mconn = muser->stdin;
 
@@ -13,7 +13,7 @@ void commandRaw( user * muser )
     mconn->buflen = 0;
 }
 
-void commandLine( user * muser )
+void terminalLine( user * muser )
 {
     // Get our input buffer
     conn * mconn = muser->stdin;
@@ -80,11 +80,11 @@ void commandLine( user * muser )
             // Log command
             if ( muser->cmdsec )
             {
-                printf( "New secure command\n" );
+                xlog( muser, "New secure command\n" );
             }
             else
             {
-                printf( "New command: '%s'\n", muser->cmdbuf );
+                xlog( muser, "New command: '%s'\n", muser->cmdbuf );
             }
         }
         else if ( mconn->buf[0] == '\b' || mconn->buf[0] == '\x7F' ) // Backspace character sent
@@ -117,7 +117,7 @@ void commandLine( user * muser )
         }
         else
         {
-            printf( "Got unknown ascii: %02x\n", mconn->buf[0] & 0xFF );
+            xlog( muser, "Got unknown ascii: %02x\n", mconn->buf[0] & 0xFF );
         }
     }
     else if ( mconn->buf[0] == '\e' && mconn->buf[1] == '[' )// Extended control string (Arrow key, Home, etc.)
@@ -191,16 +191,16 @@ void commandLine( user * muser )
     }
     else
     {
-        printf( "Random string:\n" );
+        zlog( "Random string: " );
         for ( i = 0; i < mconn->buflen; i++ )printf( "%02x|", mconn->buf[i] & 0xFF );
-        printf( "\n" );
+        printf( "\b \b\n" );
     }
 
     // Empty the buffer
     mconn->buflen = 0;
 }
 
-void commandShell( user * muser )
+void terminalShell( user * muser )
 {
 
 }

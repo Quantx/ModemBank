@@ -2,14 +2,14 @@
 #include "commands.h"
 
 void (* const command_list[COMMAND_COUNT]) ( user * muser, int argc, char * argv[]) = {
-    cmd_help
+    commandHelp
 };
 
 const char * command_alias[COMMAND_COUNT] = {
     "help"
 };
 
-void cmd_help( user * muser, int argc, char * argv[] )
+void commandHelp( user * muser, int argc, char * argv[] )
 {
     conn * mconn = muser->stdin;
     char help_path[50];
