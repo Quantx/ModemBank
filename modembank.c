@@ -251,6 +251,8 @@ int main( int argc, char * argv[] )
                 iur->stdin->buflen = 0;
                 // Process the command
                 terminalShell( iur );
+                // Print next prompt
+                uprintf( iur, "@" );
             }
         }
 
@@ -333,7 +335,7 @@ int createSession( user ** headuser, conn * newconn )
     // Set command line
     newuser->cmdsec = 0;
     newuser->cmdwnt = 20; // First prompt is username
-    newuser->cmdlen = 0;
+    newuser->cmdlen = 0; // Negative means that we need to print a prompt
     newuser->cmdpos = 0;
     // Default terminal size
     newuser->width = 80;
@@ -351,29 +353,6 @@ int createSession( user ** headuser, conn * newconn )
     return 1;
 }
 
-int uprintf( user * muser, const char * format, ... )
-{
-    if ( muser == NULL
-    || muser->flags & FLAG_GARB
-    || muser->stdin == NULL
-    || muser->stdin->flags & FLAG_GARB ) return -1;
-
-    va_list args;
-    va_start( args, format );
-
-    int stdout = dup(1); // Copy a reference to stdout
-
-    dup2( muser->stdin->fd, 1 ); // Overwrite stdout with the client's socket
-
-    int out = vprintf( format, args ); // Print the string
-
-    dup2( stdout, 1 ); // Reset stdout to original
-
-    va_end( args );
-
-    return out;
-};
-
 void sigHandler(int sig)
 {
     // Only soft exit if we're in the loop
@@ -387,6 +366,33 @@ void sigHandler(int sig)
     // We need to hard exit
     if ( isRunning ) exit(0);
 }
+
+
+int uprintf( user * muser, const char * format, ... )
+{
+    if ( muser == NULL
+    || muser->flags & FLAG_GARB
+    || muser->stdin == NULL
+    || muser->stdin->flags & FLAG_GARB ) return -1;
+
+    va_list args;
+    va_start( args, format );
+
+    // Save a reference to stdout
+    int fdout = dup(1);
+    // Overwrite stdout with the I/O device
+    dup2( muser->stdin->fd, 1 );
+    // Print to the I/O device
+    int out = vprintf( format, args );
+    // Ensure string is sent to the device
+    fflush( stdout );
+    // Reset stdout to it's default value
+    dup2( fdout, 1 );
+
+    va_end( args );
+
+    return out;
+};
 
 void xlog( user * muser, const char * format, ... )
 {

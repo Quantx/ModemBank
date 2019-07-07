@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <stdarg.h>
 #include <unistd.h>
+#include <dirent.h>
 
 #include <time.h>
 #include <poll.h>

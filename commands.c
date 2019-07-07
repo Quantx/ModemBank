@@ -3,16 +3,20 @@
 
 void (* const command_list[COMMAND_COUNT]) ( user * muser, int argc, char * argv[]) = {
     commandHelp,
-    commandExit
+    commandExit,
+    commandClear
 };
 
 const char * command_alias[COMMAND_COUNT] = {
     "help,?",
-    "exit,quit,logout"
+    "exit,quit,logout",
+    "clear,cls"
 };
 
 void (* const findCommand(const char * cmd)) ( user * muser, int argc, char * argv[] )
 {
+    if ( cmd == NULL ) return NULL;
+
     char * cmdtok;
     char alias[256];
     int i;
@@ -39,7 +43,7 @@ void (* const findCommand(const char * cmd)) ( user * muser, int argc, char * ar
 
 void commandHelp( user * muser, int argc, char * argv[] )
 {
-    char help_path[50];
+    char helppath[300];
     char helpbuf[256];
     int i;
     FILE * fd;
@@ -53,18 +57,25 @@ void commandHelp( user * muser, int argc, char * argv[] )
             return;
         }
 
-        sprintf( help_path, "%s.hlp", argv[1] );
+        sprintf( helppath, "assets/help/%s.hlp", argv[1] );
 
-        fd = fopen( help_path, "r" );
+        fd = fopen( helppath, "r" );
 
         if ( fd == NULL )
         {
-            printf( "Unable to open help file: %s\n", help_path );
+            zlog( "Unable to open help file: %s\n", helppath );
             return;
         }
 
+        // Discard first line
+        fgets( helpbuf, 256, fd );
+
         while ( fgets( helpbuf, 256, fd ) != NULL )
         {
+            int lln = strlen( helpbuf );
+            // Discard unix line endings
+            if ( helpbuf[lln - 1] == '\n' ) helpbuf[lln - 1] = '\0';
+
             uprintf( muser, "%s\r\n", helpbuf );
         }
 
@@ -73,6 +84,53 @@ void commandHelp( user * muser, int argc, char * argv[] )
 
         return;
     }
+
+    DIR * dr = opendir( "assets/help/" );
+
+    if ( dr == NULL )
+    {
+        zlog( "Unable to open help directory: assets/help/\n" );
+        return;
+    }
+
+    struct dirent * dir;
+
+    // Read each file in directory
+    while ( (dir = readdir( dr )) != NULL )
+    {
+        // Find location of "." in filename
+        char * dotpos = strrchr( dir->d_name, '.' );
+
+        // Not a help file
+        if ( dotpos == NULL || strcmp( dotpos, ".hlp" ) ) continue;
+
+        // Build help file path
+        sprintf( helppath, "assets/help/%s", dir->d_name );
+
+        fd = fopen( helppath, "r" );
+
+        if ( fd == NULL )
+        {
+            zlog( "Unable to open help file: %s\n", helppath );
+            return;
+        }
+
+        // Get first line
+        fgets( helpbuf, 256, fd );
+
+        // Remove unix line endings
+        int lln = strlen( helpbuf );
+        if ( helpbuf[lln - 1] == '\n' ) helpbuf[lln - 1] = '\0';
+
+        // Send first line
+        uprintf( muser, "%s\r\n", helpbuf );
+
+        // Close help file
+        fclose( fd );
+    }
+
+    // Close help directory
+    closedir( dr );
 }
 
 // Logout this user
@@ -82,4 +140,10 @@ void commandExit( user * muser, int argc, char * argv[] )
     uprintf( muser, "%%%s: terminated session\r\n", argv[0] );
     // Deep six their ass
     muser->flags |= FLAG_GARB;
+}
+
+void commandClear( user * muser, int argc, char * argv[] )
+{
+    // Transmit ANSI home & clear screen codes
+    uprintf( muser, "\e[H\e[2J" );
 }
