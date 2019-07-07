@@ -2,11 +2,13 @@
 #include "commands.h"
 
 void (* const command_list[COMMAND_COUNT]) ( user * muser, int argc, char * argv[]) = {
-    commandHelp
+    commandHelp,
+    commandExit
 };
 
 const char * command_alias[COMMAND_COUNT] = {
-    "help,?"
+    "help,?",
+    "exit,quit,logout"
 };
 
 void (* const findCommand(const char * cmd)) ( user * muser, int argc, char * argv[] )
@@ -37,7 +39,6 @@ void (* const findCommand(const char * cmd)) ( user * muser, int argc, char * ar
 
 void commandHelp( user * muser, int argc, char * argv[] )
 {
-    conn * mconn = muser->stdin;
     char help_path[50];
     char helpbuf[256];
     int i;
@@ -48,9 +49,7 @@ void commandHelp( user * muser, int argc, char * argv[] )
         if ( findCommand( argv[1] ) == NULL )
         {
             // Print out error message
-            write( mconn->fd, "Unknown command: ", 17 );
-            write( mconn->fd, argv[1], strlen(argv[1]) );
-            write( mconn->fd, "\r\n", 2 );
+            uprintf( muser, "%%help: unknown command: %s\r\n", argv[1] );
             return;
         }
 
@@ -66,8 +65,7 @@ void commandHelp( user * muser, int argc, char * argv[] )
 
         while ( fgets( helpbuf, 256, fd ) != NULL )
         {
-            write( mconn->fd, helpbuf, strlen(helpbuf) );
-            write( mconn->fd, "\r\n", 2 );
+            uprintf( muser, "%s\r\n", helpbuf );
         }
 
         // Close help file
@@ -75,4 +73,13 @@ void commandHelp( user * muser, int argc, char * argv[] )
 
         return;
     }
+}
+
+// Logout this user
+void commandExit( user * muser, int argc, char * argv[] )
+{
+    // Tell user they're being logged off
+    uprintf( muser, "%%%s: terminated session\r\n", argv[0] );
+    // Deep six their ass
+    muser->flags |= FLAG_GARB;
 }

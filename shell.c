@@ -260,22 +260,29 @@ void terminalShell( user * muser )
 
     if ( hunt == '\'' )
     {
-        uprintf( muser, "Missing closing single-quote\r\n" );
+        uprintf( muser, "%%missing closing single-quote\r\n" );
         return;
     }
     else if ( hunt == '"' )
     {
-        uprintf( muser, "Missing closing double-quote\r\n" );
+        uprintf( muser, "%%missing closing double-quote\r\n" );
         return;
     }
 
     // Arg after last must be null
     argv[argc] = NULL;
 
-    printf( "Got %d arguments\n", argc );
+    if ( argc <= 0 ) return;
 
-    for ( i = 0; i < argc; i++ )
+    // Find command
+    void (* const command) ( user * muser, int argc, char * argv[]) = findCommand( argv[0] );
+
+    if ( command == NULL )
     {
-       printf( ">>>%s<<<\n", argv[i] );
+        uprintf( muser, "%%unknown command: %s\r\n", argv[0] );
+        return;
     }
+
+    // Run command
+    command( muser, argc, argv );
 }

@@ -352,7 +352,7 @@ int connGarbage( conn ** headconn )
             // Close socket
             close( icn->fd );
 
-            ylog( icn, "Terminated an %s connection\n", icn->flags & FLAG_OUTG ? "outgoing" : "incoming");
+            ylog( icn, "Terminated an %s connection\n", icn->flags & FLAG_OUTG ? "outgoing" : "incoming" );
 
             // Check if we're the head
             if ( prevconn == NULL )

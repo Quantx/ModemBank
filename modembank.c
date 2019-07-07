@@ -7,6 +7,9 @@ int main( int argc, char * argv[] )
     // Setup cleanup code first
     signal( SIGINT, sigHandler );
 
+    // Seed our RNG
+    srand( time(NULL) );
+
     int servsock, connsock, clilen, i;
     struct sockaddr_in serv_addr, cli_addr;
 
@@ -136,10 +139,39 @@ int main( int argc, char * argv[] )
 
         poll( pfds, pfd_size, TIMEOUT * 1000 );
 
-        // Accept new connections
+        i = 1;
+        for ( icn = headconn; icn != NULL && i < pfd_size; (icn = icn->next),i++ )
+        {
+            if ( pfds[i].revents & POLLERR ) // Socket error
+            {
+                icn->flags |= FLAG_GARB;
+            }
+            else if ( pfds[i].revents & POLLIN ) // Data to be read
+            {
+                // Read in data
+                int ret = read( icn->fd, icn->buf + icn->buflen, BUFFER_LEN - icn->buflen );
+
+                // Check for termination
+                if ( ret <= 0 )
+                {
+                    // Flag as garbage
+                    icn->flags |= FLAG_GARB;
+                }
+                else
+                {
+                    // Update buffer length
+                    icn->buflen += ret;
+
+                    // Add end of string char
+                    icn->buf[icn->buflen] = '\0';
+                }
+            }
+        }
+
+        // Accept new connections last
         if ( pfds[0].revents & POLLIN )
         {
-            connsock = accept(servsock, (struct sockaddr *) &cli_addr, &clilen);
+            connsock = accept( servsock, (struct sockaddr *) &cli_addr, &clilen );
 
             if ( connsock < 0 )
             {
@@ -156,11 +188,14 @@ int main( int argc, char * argv[] )
                 newconn->buflen = 0;
                 newconn->org.addr = cli_addr;
 
-                // Save the IP of the client
-                inet_ntop( AF_INET, &(newconn->org.addr.sin_addr), newconn->name, CONNNAME_LEN );
+                char ipstr[40];
+                // Convert the IP to a string
+                inet_ntop( AF_INET, &(newconn->org.addr.sin_addr), ipstr, 40 );
+                // Print out the port and string
+                sprintf( newconn->name, "%s:%hu", ipstr, newconn->org.addr.sin_port );
 
                 // Transmit telnet init string
-                write( connsock, "\xFF\xFD\x22\xFF\xFB\x01\xFF\xFB\x03\xFF\xFD\x1F\xFF\xFD\x18", 15 );
+                write( newconn->fd, "\xFF\xFD\x22\xFF\xFB\x01\xFF\xFB\x03\xFF\xFD\x1F\xFF\xFD\x18", 15 );
 
                 // Insert node
                 newconn->next = headconn;
@@ -169,37 +204,10 @@ int main( int argc, char * argv[] )
                 // Increment count
                 conn_count++;
 
+                ylog( newconn, "Accepted incoming connection\n" );
+
                 // Increment count
                 user_count += createSession( &headuser, newconn );
-            }
-        }
-
-        i = 1;
-        for ( icn = headconn; icn != NULL && i < pfd_size; (icn = icn->next),i++ )
-        {
-            if ( pfds[i].revents & POLLIN ) // Data to be read
-            {
-                // Read in data
-                int ret = read( icn->fd, icn->buf + icn->buflen, BUFFER_LEN - icn->buflen );
-
-                // Check for termination
-                if ( ret < 0 )
-                {
-
-                }
-                else if ( !ret )
-                {
-                    // Flag as garbage
-                    icn->flags |= FLAG_GARB;
-                }
-                else
-                {
-                    // Update buffer length
-                    icn->buflen += ret;
-
-                    // Add end of string char
-                    icn->buf[icn->buflen] = '\0';
-                }
             }
         }
 
@@ -216,6 +224,9 @@ int main( int argc, char * argv[] )
                 iur->flags |= FLAG_GARB;
                 continue;
             }
+
+            // Update AFK timer
+            if ( iur->stdin->buflen > 0 ) time( &(iur->last) );
 
             // If we're not a modem, decode Telnet options
             if ( !(iur->stdin->flags & FLAG_MODM) )
@@ -304,16 +315,21 @@ int main( int argc, char * argv[] )
 int createSession( user ** headuser, conn * newconn )
 {
     // Create a new user session for this socket
-    user * newuser = malloc( sizeof(newuser) );
+    user * newuser = malloc( sizeof(user) );
+
+    // Zero out flags
+    newuser->flags = 0;
 
     // Associate the new conn & user
     newuser->stdin = newconn;
     newuser->stdout = NULL;
 
-    // Set default username
-    strcpy( newuser->name, "guest" );
     // Take note of current time
-    newuser->first = newuser->last = time(NULL);
+    time( &(newuser->first) );
+    time( &(newuser->last ) );
+
+    // Set default username
+    sprintf( newuser->name, "guest-%d", rand() );
     // Set command line
     newuser->cmdsec = 0;
     newuser->cmdwnt = 20; // First prompt is username
@@ -322,6 +338,7 @@ int createSession( user ** headuser, conn * newconn )
     // Default terminal size
     newuser->width = 80;
     newuser->height = 24;
+
     // Default terminal name
     strcpy( newuser->termtype, "unknown" );
 
