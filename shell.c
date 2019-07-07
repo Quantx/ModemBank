@@ -202,6 +202,80 @@ void terminalLine( user * muser )
 
 void terminalShell( user * muser )
 {
+    // Prep for next command
+    muser->cmdwnt = 100;
 
+    // No command given, reset
+    if ( muser->cmdbuf[0] == '\0' ) return;
+
+    int i, k;
+    char hunt = '\0'; // Character to hunt for
+    /* Modes:
+       '\0' - Hunt for word character
+       ' '  - Hunt for white space
+       '\'' - Hunt for single quote (')
+       '"'  - Hunt for double quote (")
+       NOTE: It is illegal to end tokenization in modes 2, 3, or 4
+    */
+
+    int argc = 0;
+    char * argv[256];
+
+    // Tokenize this bitch
+    for ( i = 0; muser->cmdbuf[i] != '\0'; i++ )
+    {
+        // Handle escapes first
+        if ( muser->cmdbuf[i] == '\\' )
+        {
+            // Remove \ from command string
+            for ( k = i; muser->cmdbuf[k] != '\0'; k++ )
+            {
+                muser->cmdbuf[k] = muser->cmdbuf[k + 1];
+            }
+        }
+        else if ( hunt == '\0' )
+        {
+            if ( muser->cmdbuf[i] == '\''
+            || muser->cmdbuf[i] == '"' )
+            {
+                // Skip the first quote and store an arg pointer
+                argv[argc++] = muser->cmdbuf + i + 1;
+                // Store the exit quote
+                hunt = muser->cmdbuf[i];
+            }
+            else if ( muser->cmdbuf[i] != ' ' )
+            {
+                // Store an arg pointer
+                argv[argc++] = muser->cmdbuf + i;
+                // Hunt for the next space
+                hunt = ' ';
+            }
+        }
+        else if ( muser->cmdbuf[i] == hunt )
+        {
+            // Terminate argument and reset hunt
+            muser->cmdbuf[i] = hunt = '\0';
+        }
+    }
+
+    if ( hunt == '\'' )
+    {
+        uprintf( muser, "Missing closing single-quote\r\n" );
+        return;
+    }
+    else if ( hunt == '"' )
+    {
+        uprintf( muser, "Missing closing double-quote\r\n" );
+        return;
+    }
+
+    // Arg after last must be null
+    argv[argc] = NULL;
+
+    printf( "Got %d arguments\n", argc );
+
+    for ( i = 0; i < argc; i++ )
+    {
+       printf( ">>>%s<<<\n", argv[i] );
+    }
 }
-

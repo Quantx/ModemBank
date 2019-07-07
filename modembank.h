@@ -106,6 +106,7 @@ void  zlog(const char * format, ...);
 void vzlog(const char * format, va_list args);
 
 int createSession(user ** headuser, conn * newconn);
+int uprintf(user * muser, const char * format, ...);
 
 void sigHandler(int sig);
 

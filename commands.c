@@ -6,8 +6,34 @@ void (* const command_list[COMMAND_COUNT]) ( user * muser, int argc, char * argv
 };
 
 const char * command_alias[COMMAND_COUNT] = {
-    "help"
+    "help,?"
 };
+
+void (* const findCommand(const char * cmd)) ( user * muser, int argc, char * argv[] )
+{
+    char * cmdtok;
+    char alias[256];
+    int i;
+
+    for ( i = 0; i < COMMAND_COUNT; i++ )
+    {
+        // Don't let strtok destroy the original
+        strcpy( alias, command_alias[i] );
+        // Check each alias
+        cmdtok = strtok( alias, "," );
+        while ( cmdtok != NULL )
+        {
+            if ( !strcmp( cmdtok, cmd ) )
+            {
+                return command_list[i];
+            }
+
+            cmdtok = strtok( NULL, "," );
+        }
+    }
+
+    return NULL;
+}
 
 void commandHelp( user * muser, int argc, char * argv[] )
 {
@@ -19,12 +45,7 @@ void commandHelp( user * muser, int argc, char * argv[] )
 
     if ( argc > 1 )
     {
-        for ( i = 0; i < COMMAND_COUNT; i++ )
-        {
-            if ( !strcmp( argv[1], command_alias[i] ) ) break;
-        }
-
-        if ( i == COMMAND_COUNT )
+        if ( findCommand( argv[1] ) == NULL )
         {
             // Print out error message
             write( mconn->fd, "Unknown command: ", 17 );

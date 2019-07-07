@@ -233,7 +233,8 @@ int main( int argc, char * argv[] )
                 // Assemble a command string
                 terminalLine( iur );
             }
-            else if ( !iur->cmdwnt )
+            // Make this seperate so we can finish on same cycle
+            if ( !iur->cmdwnt )
             {
                 // Nuke the backlog
                 iur->stdin->buflen = 0;
@@ -332,6 +333,29 @@ int createSession( user ** headuser, conn * newconn )
 
     return 1;
 }
+
+int uprintf( user * muser, const char * format, ... )
+{
+    if ( muser == NULL
+    || muser->flags & FLAG_GARB
+    || muser->stdin == NULL
+    || muser->stdin->flags & FLAG_GARB ) return -1;
+
+    va_list args;
+    va_start( args, format );
+
+    int stdout = dup(1); // Copy a reference to stdout
+
+    dup2( muser->stdin->fd, 1 ); // Overwrite stdout with the client's socket
+
+    int out = vprintf( format, args ); // Print the string
+
+    dup2( stdout, 1 ); // Reset stdout to original
+
+    va_end( args );
+
+    return out;
+};
 
 void sigHandler(int sig)
 {
