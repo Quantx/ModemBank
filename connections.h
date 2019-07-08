@@ -12,3 +12,6 @@ int connGarbage(conn ** headconn);
 
 int setDTR(conn * mconn, int set);
 int getDCD(conn * mconn);
+
+int setBlocking(conn * mconn, int set);
+int getBlocking(conn * mconn);

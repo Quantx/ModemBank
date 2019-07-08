@@ -181,6 +181,10 @@ int configureModem( conn ** headconn, const char * path, int baud, const char * 
     // Create a new conn
     conn * newconn = malloc( sizeof(conn) );
 
+    // Record time
+    time( &(newconn->first) );
+    time( &(newconn->last ) );
+
     // Save modem information
     newconn->flags = FLAG_MODM;
     newconn->fd = mfd;
@@ -307,7 +311,40 @@ int setDTR( conn * mconn, int set )
     ioctl( mconn->fd, TIOCMSET, &status );
 
     // Return true if changed
-    return result != set;
+    return result ^ (status & TIOCM_DTR);
+}
+
+int setBlocking( conn * mconn, int set )
+{
+    // Read in socket settings
+    int status;
+    if ( (status = fcntl( mconn->fd, F_GETFL, NULL )) < 0 ) return -1;
+
+    int result = result & O_NONBLOCK;
+
+    // Toggle non-blocking mode
+    if ( !set )
+    {
+        status |= O_NONBLOCK;
+    }
+    else
+    {
+        status &= ~O_NONBLOCK;
+    }
+
+    // Update socket settings
+    if ( fcntl( mconn->fd, F_SETFL, status ) < 0 ) return -1;
+
+    return result ^ (status & O_NONBLOCK);
+}
+
+int getBlocking( conn * mconn )
+{
+    // Read in socket settings
+    int status;
+    if ( (status = fcntl( mconn->fd, F_GETFL, NULL )) < 0 ) return -1;
+
+    return status & O_NONBLOCK;
 }
 
 int connGarbage( conn ** headconn )

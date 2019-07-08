@@ -18,6 +18,13 @@ void terminalLine( user * muser )
     // Get our input buffer
     conn * mconn = muser->stdin;
 
+    // Print the prompt
+    if ( muser->cmdppt[0] != '\0' )
+    {
+        uprintf( muser, muser->cmdppt );
+        muser->cmdppt[0] = '\0';
+    }
+
     // Nothing to do here
     if ( mconn->buflen <= 0 || muser->cmdwnt <= 0 ) return;
 
@@ -204,6 +211,7 @@ void terminalShell( user * muser )
 {
     // Prep for next command
     muser->cmdwnt = 100;
+    strcpy( muser->cmdppt, "@" );
 
     // No command given, reset
     if ( muser->cmdbuf[0] == '\0' ) return;
@@ -285,4 +293,24 @@ void terminalShell( user * muser )
 
     // Run command
     command( muser, argc, argv );
+}
+
+void terminalBridge( user * muser )
+{
+    if ( muser->stdin == NULL || muser->stdin->flags & FLAG_GARB
+    ||  muser->stdout == NULL || muser->stdout->flags & FLAG_GARB ) return;
+
+    // Copy in to out
+    if ( muser->stdin->buflen > 0 )
+    {
+        write( muser->stdout->fd, muser->stdin->buf, muser->stdin->buflen );
+        muser->stdin->buflen = 0;
+    }
+
+    // Copy out to in
+    if ( muser->stdout->buflen > 0 )
+    {
+        write( muser->stdin->fd, muser->stdout->buf, muser->stdout->buflen );
+        muser->stdout->buflen = 0;
+    }
 }

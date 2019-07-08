@@ -121,8 +121,21 @@ int main( int argc, char * argv[] )
 
             // Skip garbage connection
             if ( icn->flags & FLAG_GARB ) continue;
-            // Skip unconnected modems
-            if ( icn->flags & FLAG_MODM && !(icn->flags & FLAG_CALL) ) continue;
+
+            if ( !(icn->flags & FLAG_CALL) )
+            {
+                // Skip unconnected modems
+                if ( icn->flags & FLAG_MODM ) continue;
+
+                // Check for socket timeouts
+                if ( time(NULL) > icn->first + CONN_TIMEOUT )
+                {
+                    ylog( icn, "Connection timed out\n" );
+                    icn->flags |= FLAG_GARB;
+
+                    continue;
+                }
+            }
 
             // Can we read?
             if ( icn->buflen < BUFFER_LEN )
@@ -137,17 +150,58 @@ int main( int argc, char * argv[] )
 
         zlog( "Polling %d buffers, %d users\n", i, user_count );
 
-        poll( pfds, pfd_size, TIMEOUT * 1000 );
+        poll( pfds, pfd_size, MASTER_TIMEOUT * 1000 );
 
         i = 1;
         for ( icn = headconn; icn != NULL && i < pfd_size; (icn = icn->next),i++ )
         {
             if ( pfds[i].revents & POLLERR ) // Socket error
             {
+                // Modem error
+                if ( icn->flags & FLAG_MODM )
+                {
+                    icn->flags |= FLAG_GARB;
+                }
+                // Socket error
+                else
+                {
+                    int error = 0;
+                    socklen_t errlen = sizeof(error);
+                    getsockopt( icn->fd, SOL_SOCKET, SO_ERROR, (void *)&error, &errlen);
+
+                    // Handle "still connecting" errors
+                    if ( error == EINPROGRESS && icn->flags & FLAG_OUTG )
+                    {
+                        // Did we exceede timeout?
+                        if ( time(NULL) > icn->first + CONN_TIMEOUT )
+                        {
+                            icn->flags |= FLAG_GARB;
+                        }
+                    }
+                    // Unknown error, abort!
+                    else
+                    {
+                        icn->flags |= FLAG_GARB;
+                    }
+                }
+            }
+            else if ( pfds[i].revents & POLLHUP ) // Socket hang-up, close it
+            {
                 icn->flags |= FLAG_GARB;
             }
             else if ( pfds[i].revents & POLLIN ) // Data to be read
             {
+                // Re-enable blocking on outgoing sockets
+                if ( icn->flags & FLAG_OUTG
+                && !(icn->flags & FLAG_MODM)
+                && !(icn->flags & FLAG_CALL) )
+                {
+                    setBlocking( icn, 1 );
+                    // Failed to set blocking, kill socket
+                    icn->flags |= FLAG_CALL;
+                    continue;
+                }
+
                 // Read in data
                 int ret = read( icn->fd, icn->buf + icn->buflen, BUFFER_LEN - icn->buflen );
 
@@ -159,6 +213,9 @@ int main( int argc, char * argv[] )
                 }
                 else
                 {
+                    // Record last time
+                    time( &(icn->last) );
+
                     // Update buffer length
                     icn->buflen += ret;
 
@@ -183,10 +240,14 @@ int main( int argc, char * argv[] )
                 conn * newconn = malloc( sizeof(conn) );
 
                 // Initialize conn
-                newconn->flags = 0;
+                newconn->flags = FLAG_CALL;
                 newconn->fd = connsock;
                 newconn->buflen = 0;
                 newconn->org.addr = cli_addr;
+
+                // Record time
+                time( &(newconn->first) );
+                time( &(newconn->last ) );
 
                 char ipstr[40];
                 // Convert the IP to a string
@@ -225,35 +286,56 @@ int main( int argc, char * argv[] )
                 continue;
             }
 
+            // Break out of bridge mode if needed
+            if ( iur->flags & FLAG_BRDG && ( iur->stdout == NULL || iur->stdout->flags & FLAG_GARB ) )
+            {
+                if ( iur->stdout != NULL )
+                {
+                    if ( iur->stdout->flags & FLAG_CALL ) uprintf( iur, "\r\n" );
+                    uprintf( iur, "Connection %s\r\n", iur->stdout->flags & FLAG_CALL ? "terminated" : "timed out" );
+                }
+
+                iur->flags &= ~FLAG_BRDG;
+            }
+
             // Update AFK timer
             if ( iur->stdin->buflen > 0 ) time( &(iur->last) );
 
-            // If we're not a modem, decode Telnet options
-            if ( !(iur->stdin->flags & FLAG_MODM) )
+            // Operate in bridge mode
+            if ( iur->flags & FLAG_BRDG )
             {
-                telnetOptions( iur );
+                terminalBridge( iur );
+            }
+            else
+            {
+                // If we're not a modem, decode Telnet options
+                if ( !(iur->stdin->flags & FLAG_MODM) )
+                {
+                    telnetOptions( iur );
+                }
+
+                if ( iur->cmdwnt < 0 )
+                {
+                    // Get raw input
+                    terminalRaw( iur );
+                }
+                else if ( iur->cmdwnt > 0 )
+                {
+                    // Assemble a command string
+                    terminalLine( iur );
+                }
+
+                // Make this seperate so we can finish on same cycle
+                if ( !iur->cmdwnt )
+                {
+                    // Nuke the backlog
+                    iur->stdin->buflen = 0;
+                    // Process the command
+                    terminalShell( iur );
+                }
             }
 
-            if ( iur->cmdwnt < 0 )
-            {
-                // Get raw input
-                terminalRaw( iur );
-            }
-            else if ( iur->cmdwnt > 0 )
-            {
-                // Assemble a command string
-                terminalLine( iur );
-            }
-            // Make this seperate so we can finish on same cycle
-            if ( !iur->cmdwnt )
-            {
-                // Nuke the backlog
-                iur->stdin->buflen = 0;
-                // Process the command
-                terminalShell( iur );
-                // Print next prompt
-                uprintf( iur, "@" );
-            }
+            handleOperation( &headconn, &conn_count, &headuser, &user_count, iur );
         }
 
         // User garbage collection
@@ -263,6 +345,10 @@ int main( int argc, char * argv[] )
         {
             // Keep a copy of this pointer
             nextuser = iur->next;
+
+            // Drop dead I/O devices
+            if ( iur->stdin  != NULL && iur->stdin->flags  & FLAG_GARB ) iur->stdin  = NULL;
+            if ( iur->stdout != NULL && iur->stdout->flags & FLAG_GARB ) iur->stdout = NULL;
 
             // Make sure this user is garbage
             if ( !(iur->flags & FLAG_GARB) )
@@ -322,6 +408,10 @@ int createSession( user ** headuser, conn * newconn )
     // Zero out flags
     newuser->flags = 0;
 
+    // Define initial request
+    newuser->opcmd = req_idle;
+    newuser->opdat = NULL;
+
     // Associate the new conn & user
     newuser->stdin = newconn;
     newuser->stdout = NULL;
@@ -337,6 +427,8 @@ int createSession( user ** headuser, conn * newconn )
     newuser->cmdwnt = 20; // First prompt is username
     newuser->cmdlen = 0; // Negative means that we need to print a prompt
     newuser->cmdpos = 0;
+    // Set prompt
+    strcpy( newuser->cmdppt, "@" );
     // Default terminal size
     newuser->width = 80;
     newuser->height = 24;
@@ -355,16 +447,23 @@ int createSession( user ** headuser, conn * newconn )
 
 void sigHandler(int sig)
 {
-    // Only soft exit if we're in the loop
-    if ( isRunning == 1 ) isRunning = 0;
-
     // Hide the CTRL+C
     printf("\b\b  \b\b");
     // Print log message
     zlog("*** Interrupt Signaled ***\n");
 
+    // This is the second abort attempt, we need to hard exit
+    if ( isRunning == 0 )
+    {
+        zlog( "Unable to gracefully stop ModemBank: hard exit\n" );
+        exit(1);
+    }
+
+    // Only soft exit if we're in the loop
+    if ( isRunning == 1 ) isRunning = 0;
+
     // We need to hard exit
-    if ( isRunning ) exit(0);
+    if ( isRunning > 1 ) exit(0);
 }
 
 
@@ -410,9 +509,13 @@ void vxlog( user * muser, const char * format, va_list args )
 
     strcpy( perms, "USER" );
 
-    if ( muser->flags & FLAG_ADMN )
+    if ( muser->flags & FLAG_DEVL && muser->flags & FLAG_OPER )
     {
         strcpy( perms, "ADMIN" );
+    }
+    else if ( muser->flags & FLAG_DEVL )
+    {
+        strcpy( perms, "DEV" );
     }
     else if ( muser->flags & FLAG_OPER )
     {
