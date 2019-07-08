@@ -4,13 +4,15 @@
 void (* const command_list[COMMAND_COUNT]) ( user * muser, int argc, char * argv[]) = {
     commandHelp,
     commandExit,
-    commandClear
+    commandClear,
+    commandTelnet
 };
 
 const char * command_alias[COMMAND_COUNT] = {
     "help,?",
     "exit,quit,logout",
-    "clear,cls"
+    "clear,cls",
+    "telnet,connect"
 };
 
 void (* const findCommand(const char * cmd)) ( user * muser, int argc, char * argv[] )
@@ -146,4 +148,43 @@ void commandClear( user * muser, int argc, char * argv[] )
 {
     // Transmit ANSI home & clear screen codes
     uprintf( muser, "\e[H\e[2J" );
+}
+
+void commandTelnet( user * muser, int argc, char * argv[] )
+{
+    // Need to specify an address
+    if ( argc <= 1 )
+    {
+        uprintf( muser, "%%%s: please specify a destination address", argv[0] );
+        return;
+    }
+
+    struct addrinfo hints, * res;
+    char addrstr[100];
+    char * port = "telnet";
+
+    bzero(&hints, sizeof(struct addrinfo));
+    hints.ai_family = AF_INET; //AF_UNSPEC;
+    hints.ai_socktype = SOCK_STREAM;
+    hints.ai_flags |= AI_CANONNAME;// | AI_NUMERICSERV;
+
+    // Did the user specify a port?
+    if ( argc > 2 ) port = argv[2];
+
+    if ( getaddrinfo( argv[1], port, &hints, &res ) )
+    {
+        uprintf( muser, "%%%s: invalid service/port or address: %s %s\r\n", argv[0], argv[1], port );
+        return;
+    }
+
+    if ( !res )
+    {
+        uprintf( muser, "%%%s: unable to resolve address: %s\r\n", argv[0], argv[1] );
+        return;
+    }
+
+    // Generate an "open outgoing socket" request
+    muser->opcmd = req_opensock;
+    // Save the destination address
+    muser->opdat = res;
 }

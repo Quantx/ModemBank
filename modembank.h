@@ -3,6 +3,7 @@
 #include <stdarg.h>
 #include <unistd.h>
 #include <dirent.h>
+#include <errno.h>
 
 #include <time.h>
 #include <poll.h>
@@ -26,9 +27,10 @@
 
 // Network constants
 #define HOST_PORT 5001
+#define CONN_TIMEOUT 5
 
 // Modem & Network constatns
-#define TIMEOUT 5
+#define MASTER_TIMEOUT 5
 #define BUFFER_LEN 256
 #define CONNNAME_LEN 20
 
@@ -36,16 +38,21 @@
 #define TERMTYPE_LEN 20
 #define USERNAME_LEN 20
 #define COMMAND_LEN 100
+#define PROMPT_LEN 10
 
 // Linked-list flag constants
 #define FLAG_GARB (1 << 0) // Garbage node
 // User flag constants
-#define FLAG_ADMN (1 << 1) // User is admin
-#define FLAG_OPER (1 << 2) // User is oper
+#define FLAG_DEVL (1 << 1) // User is developer (oper + dev = admin)
+#define FLAG_OPER (1 << 2) // User is sysop
+#define FLAG_BRDG (1 << 3) // User is in bridge mode (stdin in and stdout are inter-connected)
 // Conn flag constants
 #define FLAG_MODM (1 << 1) // Conn is a modem (else: socket)
 #define FLAG_OUTG (1 << 2) // Conn is outgoing
-#define FLAG_CALL (1 << 3) // Modem is currently connected
+#define FLAG_CALL (1 << 3) // Conn is currently connected
+
+// ModemBank operation list
+enum operations { req_idle, req_opensock, };
 
 typedef struct conn
 {
@@ -56,6 +63,9 @@ typedef struct conn
     int fd; // Stores the client socket fd
     char buf[BUFFER_LEN + 1]; // Stores incoming data from the socket
     int buflen; // Stores number of bytes in buf
+
+    time_t first; // Unix time of first connect
+    time_t last; // Unix time of last data
 
     char name[CONNNAME_LEN + 1]; // A printable identifier for the conn
 
@@ -85,6 +95,7 @@ typedef struct user
 
     // Command Line
     char cmdbuf[COMMAND_LEN + 1]; // Stores the current command line
+    char cmdppt[PROMPT_LEN + 1]; // Store the prompt string to print
     int cmdsec; // Boolean, does not echo characters typed if true
     int cmdwnt; // Number of bytes wanted, should not excede COMMAND_LEN, a value of 0 indicates that cmdbuf holds a valid string
     int cmdlen; // Length of current command
@@ -94,6 +105,11 @@ typedef struct user
     int width;
     int height;
     char termtype[TERMTYPE_LEN + 1]; // Terminal type
+
+    // Operation to be preformed by ModemBank
+    enum operations opcmd;
+    // Data associated with the operation, will be freed on completion
+    void * opdat;
 
     // Linked list
     struct user * next; // Next user in the linked list
@@ -114,3 +130,4 @@ void sigHandler(int sig);
 #include "connections.h"
 #include "shell.h"
 #include "commands.h"
+#include "operations.h"
