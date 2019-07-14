@@ -207,7 +207,7 @@ void terminalLine( user * muser )
     mconn->buflen = 0;
 }
 
-void terminalShell( user * muser )
+void terminalShell( data * mdata, user * muser )
 {
     // Prep for next command
     muser->cmdwnt = 100;
@@ -283,7 +283,7 @@ void terminalShell( user * muser )
     if ( argc <= 0 ) return;
 
     // Find command
-    void (* const command) ( user * muser, int argc, char * argv[]) = findCommand( argv[0] );
+    void (* const command) (data * mdata, user * muser, int argc, char * argv[]) = findCommand( argv[0] );
 
     if ( command == NULL )
     {
@@ -292,7 +292,7 @@ void terminalShell( user * muser )
     }
 
     // Run command
-    command( muser, argc, argv );
+    command( mdata, muser, argc, argv );
 }
 
 void terminalBridge( user * muser )

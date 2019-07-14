@@ -51,7 +51,6 @@ int loadModemConfig( conn ** headconn )
     return mod_count;
 }
 
-
 int configureModem( conn ** headconn, const char * path, int baud, const char * magic )
 {
     struct termios modopt;

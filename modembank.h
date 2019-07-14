@@ -115,6 +115,15 @@ typedef struct user
     struct user * next; // Next user in the linked list
 } user;
 
+typedef struct data
+{
+    struct conn * headconn;
+    int conn_count;
+
+    struct user * headuser;
+    int user_count;
+} data;
+
 void  xlog(user * muser, const char * format, ...);
 void vxlog(user * muser, const char * format, va_list args);
 void  ylog(conn * mconn, const char * format, ...);
@@ -130,4 +139,3 @@ void sigHandler(int sig);
 #include "connections.h"
 #include "shell.h"
 #include "commands.h"
-#include "operations.h"

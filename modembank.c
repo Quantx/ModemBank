@@ -47,18 +47,16 @@ int main( int argc, char * argv[] )
 
     zlog( "Started terminal server on port: %d\n", HOST_PORT );
 
-    // Build the user sentinel node
-    user * headuser = NULL;
-    // Number of users
-    int user_count = 0;
+    data globdata;
 
-    // Build the conn sentinel node
-    conn * headconn = NULL;
-    // Number of conns
-    int conn_count = 0;
+    globdata.headuser = NULL;
+    globdata.user_count = 0;
+
+    globdata.headconn = NULL;
+    globdata.conn_count = 0;
 
     // Configure serial modems
-    conn_count += loadModemConfig( &headconn );
+    globdata.conn_count += loadModemConfig( &(globdata.headconn) );
 
     conn * icn; // For iterrating through conns
     user * iur; // For iterrating through users
@@ -68,7 +66,7 @@ int main( int argc, char * argv[] )
     while ( isRunning )
     {
         // Check for new modem connections
-        for ( icn = headconn; icn != NULL; icn = icn->next )
+        for ( icn = globdata.headconn; icn != NULL; icn = icn->next )
         {
             // Skip, not a modem
             if ( !(icn->flags & FLAG_MODM) ) continue;
@@ -95,7 +93,7 @@ int main( int argc, char * argv[] )
                 if ( !getDCD( icn ) ) continue;
 
                 // We need to start a new session
-                user_count += createSession( &headuser, icn );
+                globdata.user_count += createSession( &(globdata.headuser), icn );
 
                 // Mark modem as active
                 icn->flags |= FLAG_CALL;
@@ -103,7 +101,7 @@ int main( int argc, char * argv[] )
         }
 
         // The 1 is for the server's listening socket
-        int pfd_size = 1 + conn_count;
+        int pfd_size = 1 + globdata.conn_count;
 
         // Store the fds of all conns
         struct pollfd * pfds = malloc( sizeof(struct pollfd) * pfd_size );
@@ -114,7 +112,7 @@ int main( int argc, char * argv[] )
 
         i = 1;
         // Add conn sockets to array
-        for ( icn = headconn; icn != NULL && i < pfd_size; (icn = icn->next), i++ )
+        for ( icn = globdata.headconn; icn != NULL && i < pfd_size; (icn = icn->next), i++ )
         {
             pfds[i].fd = icn->fd;
             pfds[i].events = 0;
@@ -136,12 +134,12 @@ int main( int argc, char * argv[] )
             }
         }
 
-        zlog( "Polling %d buffers, %d users\n", i, user_count );
+        zlog( "Polling %d buffers, %d users\n", i, globdata.user_count );
 
         poll( pfds, pfd_size, MASTER_TIMEOUT * 1000 );
 
         i = 1;
-        for ( icn = headconn; icn != NULL && i < pfd_size; (icn = icn->next),i++ )
+        for ( icn = globdata.headconn; icn != NULL && i < pfd_size; (icn = icn->next),i++ )
         {
             // Check pending sockets
             if ( !(icn->flags & FLAG_CALL) && !(icn->flags & FLAG_MODM) )
@@ -174,12 +172,14 @@ int main( int argc, char * argv[] )
                         // Did we exceede timeout?
                         if ( time(NULL) > icn->first + CONN_TIMEOUT )
                         {
+                            ylog( icn, "Connection timed out (EINPROGRESS)\n" );
                             icn->flags |= FLAG_GARB;
                         }
                     }
                     // Unknown error, abort!
                     else
                     {
+                        ylog( icn, "Conn error\n" );
                         icn->flags |= FLAG_GARB;
                     }
                 }
@@ -187,6 +187,7 @@ int main( int argc, char * argv[] )
             else if ( pfds[i].revents & POLLHUP ) // Socket hang-up, close it
             {
                 icn->flags |= FLAG_GARB;
+                ylog( icn, "Conn hangup signal\n" );
             }
             else if ( pfds[i].revents & POLLIN ) // Data to be read
             {
@@ -198,6 +199,11 @@ int main( int argc, char * argv[] )
                     setBlocking( icn, 1 );
                     // Mark this socket as an active call
                     icn->flags |= FLAG_CALL;
+
+                    write( icn->fd, "Connected to ", 28 );
+                    write( icn->fd, icn->name, strlen( icn->name ) );
+                    write( icn->fd, "\r\n", 2 );
+
                     continue;
                 }
 
@@ -209,6 +215,7 @@ int main( int argc, char * argv[] )
                 {
                     // Flag as garbage
                     icn->flags |= FLAG_GARB;
+                    ylog( icn, "Conn read error\n" );
                 }
                 else
                 {
@@ -258,16 +265,16 @@ int main( int argc, char * argv[] )
                 write( newconn->fd, "\xFF\xFD\x22\xFF\xFB\x01\xFF\xFB\x03\xFF\xFD\x1F\xFF\xFD\x18", 15 );
 
                 // Insert node
-                newconn->next = headconn;
-                headconn = newconn;
+                newconn->next = globdata.headconn;
+                globdata.headconn = newconn;
 
                 // Increment count
-                conn_count++;
+                globdata.conn_count++;
 
                 ylog( newconn, "Accepted incoming connection\n" );
 
                 // Increment count
-                user_count += createSession( &headuser, newconn );
+                globdata.user_count += createSession( &(globdata.headuser), newconn );
             }
         }
 
@@ -275,7 +282,7 @@ int main( int argc, char * argv[] )
         free( pfds );
 
         // Handle user sessions
-        for ( iur = headuser; iur != NULL; iur = iur->next )
+        for ( iur = globdata.headuser; iur != NULL; iur = iur->next )
         {
             // Check if our input buffer is dead
             if ( iur->stdin == NULL || iur->stdin->flags & FLAG_GARB )
@@ -330,17 +337,15 @@ int main( int argc, char * argv[] )
                     // Nuke the backlog
                     iur->stdin->buflen = 0;
                     // Process the command
-                    terminalShell( iur );
+                    terminalShell( &globdata, iur );
                 }
             }
-
-            handleOperation( &headconn, &conn_count, &headuser, &user_count, iur );
         }
 
         // User garbage collection
         user * prevuser = NULL;
         user * nextuser = NULL;
-        for ( iur = headuser; iur != NULL; iur = nextuser )
+        for ( iur = globdata.headuser; iur != NULL; iur = nextuser )
         {
             // Keep a copy of this pointer
             nextuser = iur->next;
@@ -366,7 +371,7 @@ int main( int argc, char * argv[] )
             // Check if we're head
             if ( prevuser == NULL )
             {
-                headuser = iur->next;
+                globdata.headuser = iur->next;
             }
             else
             {
@@ -376,11 +381,11 @@ int main( int argc, char * argv[] )
             // Free user
             free( iur );
             // Decriment user count
-            user_count--;
+            globdata.user_count--;
         }
 
         // Cleanup dead conns
-        conn_count -= connGarbage( &headconn );
+        globdata.conn_count -= connGarbage( &(globdata.headconn) );
     }
 
     // Close server listen socket
@@ -388,7 +393,7 @@ int main( int argc, char * argv[] )
 
     i = 1;
     // Close everything else
-    for ( icn = headconn; icn != NULL; (icn = icn->next), i++ )
+    for ( icn = globdata.headconn; icn != NULL; (icn = icn->next), i++ )
     {
         close( icn->fd );
     }
