@@ -159,18 +159,6 @@ int configureModem( conn ** headconn, const char * path, int baud, const char * 
         return 0;
     }
 
-    // Send reset command to modem
-    write( mfd, "ATZ\r", 4 );
-
-    // No baud rate specified, skip this one
-    if ( magic != NULL )
-    {
-        // Transmit string
-        write( mfd, magic, strlen(magic) );
-        // Terminate string
-        write( mfd, "\r", 1 );
-    }
-
     // Set blocking
     modopt.c_cc[VTIME] = 0;
     modopt.c_cc[VMIN] = 1;
@@ -188,6 +176,7 @@ int configureModem( conn ** headconn, const char * path, int baud, const char * 
     newconn->flags = FLAG_MODM;
     newconn->fd = mfd;
     newconn->buflen = 0;
+
     // Store the path to this modem
     strcpy( newconn->org.path, path );
     // Store the name of this modem
@@ -196,6 +185,18 @@ int configureModem( conn ** headconn, const char * path, int baud, const char * 
     // Insert node
     newconn->next = *headconn;
     *headconn = newconn;
+
+    // No baud rate specified, skip this one
+    if ( magic != NULL && !getDCD( newconn ) )
+    {
+        // Transmit string
+        write( mfd, magic, strlen(magic) );
+        // Terminate string
+        write( mfd, "\r", 1 );
+    }
+
+    // Make sure we're ready to accept calls
+    setDTR( newconn, 1 );
 
     ylog( newconn, "Intialized at %d baud\n", baud );
 
