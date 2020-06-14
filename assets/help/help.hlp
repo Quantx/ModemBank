@@ -1,4 +1,0 @@
-help [command] | Print list of commands, or a detailed description
-The help notation works as follows. The first word of each line is the name
-of you can run. Optional arguments are listed in square brackets [optional]
-and required arguments are listed in angular brackets <required> as such.
