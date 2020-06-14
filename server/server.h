@@ -47,6 +47,9 @@ struct session
 	Function definitions
 */
 
-// Setup all modems, returns number of modems initialized
-#define MODEM_INIT_TIMEOUT 1
+
+
+// *** Setup all modems, returns number of modems initialized
+// How long to wait for the modem to reply to AT\r (in milliseconds)
+#define MODEM_INIT_TIMEOUT 100
 int modem_setup( char * path, int ** list );
