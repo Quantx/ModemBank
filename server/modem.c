@@ -4,7 +4,8 @@
 
 speed_t baud_rates[] = { B115200,  B57600,  B38400,  B19200,  B9600,  B4800,  B2400,  B1200,  B600,  B300, B0 };
 char *  baud_list[] =  { "115200", "57600", "38400", "19200", "9600", "4800", "2400", "1200", "600", "300" };
-int modem_setup( char * path, int ** list )
+
+int modem_setup( char * path, struct modem *** list )
 {
     printf( "*** Configuring modems ***\r\n" );
 
@@ -17,20 +18,11 @@ int modem_setup( char * path, int ** list )
         return -1;
     }
 
-    int mcount = 0;
-    int nlh;
-
-    while ( (nlh = fgetc( mcf )) != EOF ) if ( (char)nlh == '\n' ) mcount++;
-    fseek( mcf, 0, SEEK_SET );
-
-    // Allocate array for modems (default size of 16)
-    *list = malloc( mcount * sizeof(int) );
-
     char * buf = NULL;
     size_t len = 0;
     ssize_t nread;
 
-    mcount = 0;
+    int mcount = 0;
 
     // Read a line from the config file
     while ( (nread = getline( &buf, &len, mcf )) >= 0 )
@@ -59,17 +51,17 @@ int modem_setup( char * path, int ** list )
         modm_cfg.c_cc[VTIME] = 0;
 
         // Auto determine baudrate
-        int i;
-        for ( i = 0; baud_rates[i] != B0; i++ )
+        int baud;
+        for ( baud = 0; baud_rates[baud] != B0; baud++ )
         {
             // Set baudrate
-            cfsetispeed( &modm_cfg, baud_rates[i] );
-            cfsetospeed( &modm_cfg, baud_rates[i] );
+            cfsetispeed( &modm_cfg, baud_rates[baud] );
+            cfsetospeed( &modm_cfg, baud_rates[baud] );
 
             if ( tcsetattr( mfd, TCSAFLUSH, &modm_cfg ) < 0 )
             {
                 printf( "failed, could not set modem attributes\r\n" );
-                i = -1;
+                baud = -1;
                 close( mfd );
                 break;
             }
@@ -81,7 +73,6 @@ int modem_setup( char * path, int ** list )
 
             char resp[33];
             int rlen = read( mfd, resp, 32 );
-            resp[rlen] = 0;
 
             int k;
             for ( k = 0; k < rlen - 2; k++ )
@@ -93,20 +84,39 @@ int modem_setup( char * path, int ** list )
             if ( k < rlen - 2 ) break;
         }
 
-        if ( i < 0 ) break;
-        if ( baud_rates[i] == B0 ) { printf( "failed, coult not determine baudrate\r\n" ); close( mfd ); continue; }
+        if ( baud < 0 ) continue;
+        if ( baud_rates[baud] == B0 ) { printf( "failed, coult not determine baud rate\r\n" ); close( mfd ); continue; }
 
-        printf( "success, baud rate is %s\r\n", baud_list[i] );
+        // Allocate memory for modem
+        **list = malloc( sizeof(struct modem) );
+
+        (**list)->next = NULL;
+        (**list)->fd = mfd;
+
+        // Get name of modem
+        tok = strtok( NULL, "," );
+
+        strncpy( (**list)->name, tok, MODEM_NAME_LEN );
+        (**list)->name[MODEM_NAME_LEN + 1] = 0;
 
         // Transmit the init string
-        tok = strtok( NULL, "\n" );
+        while ( tok = strtok( NULL, ",\n" ) )
+        {
+            int k = 0;
+            while( tok[k++] );
+            write( mfd, tok, k );
+            write( mfd, "\r", 1 );
+        }
 
-        i = 0;
-        while( tok[i++] );
-        write( mfd, tok, i );
-        write( mfd, "\r", 1 );
+        printf( "success, %s at baud rate %s\r\n", (**list)->name, baud_list[baud] );
+
+        *list = &(**list)->next;
+        mcount++;
     }
 
+    printf( "*** Configured %d modems ***\r\n", mcount );
+
+    // Free file readline buffer
     free( buf );
 
     return mcount;

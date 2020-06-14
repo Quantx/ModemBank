@@ -7,6 +7,16 @@
 	*** Struct definitions ***
 */
 
+struct modem
+{
+    #define MODEM_NAME_LEN 32
+    char name[MODEM_NAME_LEN + 1];
+
+    int fd;
+
+    struct modem * next;
+};
+
 struct account
 {
     // Username of this account
@@ -25,6 +35,8 @@ struct account
     unsigned int refs;
     // Maximum number of logins for this account
     unsigned int max_refs;
+
+    struct account * next;
 };
 
 struct session
@@ -38,9 +50,11 @@ struct session
     struct account * acct;
 
     // Pointer to a modem used to dial in
-    int * modm_in;
+    struct modem * modm_in;
     // Pointer to a modem used to dial out
-    int * modm_out;
+    struct modem * modm_out;
+
+    struct session * next;
 };
 
 /*
@@ -48,8 +62,7 @@ struct session
 */
 
 
-
 // *** Setup all modems, returns number of modems initialized
 // How long to wait for the modem to reply to AT\r (in milliseconds)
 #define MODEM_INIT_TIMEOUT 100
-int modem_setup( char * path, int ** list );
+int modem_setup( char * path, struct modem *** list );
