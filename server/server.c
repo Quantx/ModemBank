@@ -10,4 +10,6 @@ struct connection * conn_head = NULL, ** conn_tail = &conn_head;
 int main( int argc, char ** argv )
 {
     modem_setup( "modem.cfg", &modm_list );
+
+    return 0;
 }
