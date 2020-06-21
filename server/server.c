@@ -4,12 +4,29 @@
 struct modem * modm_head = NULL, ** modm_tail = &modm_head;
 // Linked list of accounts
 struct account * acct_head = NULL, ** acct_tail = &acct_head;
-// Linked list of connections
-struct connection * conn_head = NULL, ** conn_tail = &conn_head;
+// Linked list of sessions
+struct session * sess_head = NULL, ** sess_tail = &sess_head;
+
+// Shutdown flag
+static volatile int running = 1;
 
 int main( int argc, char ** argv )
 {
-    modem_setup( "modem.cfg", &modm_tail );
+    argc--; argv++; // Drop program name
+
+    int modm_size = modem_setup( "modem.cfg", &modm_tail );
+
+    int serv_sock = network_setup( "0.0.0.0:12345" );
+
+    if ( serv_sock < 0 ) printf( "*** Failed to start listening server ***\r\n" );
+
+    while ( running )
+    {
+        // Accept incoming modem connections
+        accept_modem( modm_head, &sess_tail );
+        // Accept incoming network connections
+        if ( serv_sock >= 0 ) accept_network( serv_sock, &sess_tail );
+    }
 
     return 0;
 }
