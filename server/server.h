@@ -14,8 +14,12 @@ struct {
 
 struct modem
 {
+    // Human readable name of the modem
     #define MODEM_NAME_LEN 32
     char name[MODEM_NAME_LEN + 1];
+
+    // Init string to send to the modem
+    char * init;
 
     int fd;
 

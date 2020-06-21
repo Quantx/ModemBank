@@ -115,14 +115,26 @@ int modem_setup( char * path, struct modem *** list )
         strncpy( (**list)->name, tok, MODEM_NAME_LEN );
         (**list)->name[MODEM_NAME_LEN + 1] = 0;
 
+        // Get init string
+        tok = strtok( NULL, "\n" );
+
+        int init_len = strlen(tok);
+
+        // Allocate room for init string (including final \r and null terminator)
+        (**list)->init = malloc( (init_len + 2) * sizeof(char) );
+
+        // Save init string
+        strncpy( (**list)->init, tok, init_len );
+
+        // Add a final \r
+        (**list)->init[init_len] = '\r';
+        (**list)->init[init_len + 1] = 0;
+
+        // Replace comma with \r
+        while ( tok = strchr( (**list)->init, ',' ) ) *tok = '\r';
+
         // Transmit the init string
-        while ( tok = strtok( NULL, ",\n" ) )
-        {
-            int k = 0;
-            while( tok[k++] );
-            write( mfd, tok, k );
-            write( mfd, "\r", 1 );
-        }
+        write( mfd, (**list)->init, init_len + 1 );
 
         printf( "success, %s at baud rate %s\r\n", (**list)->name, baud_rates[baud].name );
 
