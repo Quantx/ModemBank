@@ -30,7 +30,7 @@ struct account
 {
     // Username of this account
     #define ACCOUNT_USERNAME_LEN 16
-    char path[ACCOUNT_USERNAME_LEN + 1];
+    char name[ACCOUNT_USERNAME_LEN + 1];
 
     struct {
         // User is a developer (debug commands)
