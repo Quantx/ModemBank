@@ -2,20 +2,77 @@
 
 int accept_modem( struct modem * mhead, struct session *** ctail )
 {
+    int sess_count = 0;
+
     // Check each modem
     for ( struct modem * cmodm = mhead; cmodm != NULL; cmodm = cmodm->next )
     {
-        
+        int curDCD = getDCD( cmodm->fd );
+        int curDTR = getDTR( cmodm->fd );
+
+        // Incoming call
+        if ( cmodm->state == modem_state_idle && curDCD )
+        {
+            // Create and empty struct
+            struct session * new_sess = malloc( sizeof(struct session) );
+            memset( new_sess, 0, sizeof(struct session) );
+
+            // Assign modem to session
+            new_sess->modm_in = cmodm;
+
+            // TODO: Read Caller ID
+
+            // Spawn new client
+            if ( !spawn_client( cmodm->fd, new_sess ) )
+            {
+                // Tell modem to hangup
+                setDTR( cmodm->fd, 0 );
+                cmodm->state = modem_state_hangup;
+
+                free( new_sess );
+                continue;
+            }
+
+            cmodm->state = modem_state_dial_in;
+
+            // Add session to list
+            **ctail = new_sess;
+
+            *ctail = &(**ctail)->next;
+            sess_count++;
+        }
+        // Waiting for modem to hangup
+        else if ( cmodm->state == modem_state_hangup )
+        {
+            // Modem actually hung up
+            if ( !curDCD )
+            {
+                // Switch back to idle
+                setDTR( cmodm->fd, 1 );
+                cmodm->state = modem_state_idle;
+            }
+            // Forgot to unassert DTR
+            else if ( curDTR )
+            {
+                setDTR( cmodm->fd, 0 );
+            }
+        }
     }
+
+    return sess_count;
 }
 
 int accept_network( int serv_sock, struct session *** ctail )
 {
+    int sess_count = 0;
+
     // Loop until there are no new sessions
     while (1)
     {
         struct session * new_sess = malloc( sizeof(struct session) );
+        memset( new_sess, 0, sizeof(struct session) );
 
+        // Accept new network connection, and record IP address
         int addr_len = sizeof(new_sess->in_addr);
         int cli_sock = accept( serv_sock, (struct sockaddr *) &(new_sess->in_addr), &addr_len );
 
@@ -38,7 +95,15 @@ int accept_network( int serv_sock, struct session *** ctail )
 
         // No longer need our copy of the client socket
         close( cli_sock );
+
+        // Add session to list
+        **ctail = new_sess;
+
+        *ctail = &(**ctail)->next;
+        sess_count++;
     }
+
+    return sess_count;
 }
 
 int spawn_client( int cli_fd, struct session * cli_sess )
@@ -91,7 +156,7 @@ int spawn_client( int cli_fd, struct session * cli_sess )
         close( p_recv[0] ); close( p_recv[1] );
         close( p_error[0] ); close( p_error[1] );
 
-        perror( "Failed child create fork" );
+        perror( "Failed child creation fork" );
         return 0;
     }
 
@@ -104,6 +169,9 @@ int spawn_client( int cli_fd, struct session * cli_sess )
 
     // Record pid
     cli_sess->pid = cli_pid;
+
+    // Record time of birth
+    time( &(cli_sess->born) );
 
     // Record pipes
     cli_sess->pipe_send = p_send[1];

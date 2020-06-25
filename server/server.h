@@ -2,21 +2,34 @@
 #include <unistd.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <netinet/in.h>
 
 /*
 	*** Struct definitions ***
 */
 
-struct {
+struct
+{
 
 } config;
+
+enum modem_state
+{
+    modem_state_idle, // Waiting to dial / recive a call
+    modem_state_dialing, // Dialing out
+    modem_state_dial_in, // Modem is reciving a call
+    modem_state_dial_out, // Modem initiated a call
+    modem_state_hangup // Modem is hanging up
+};
 
 struct modem
 {
     // Human readable name of the modem
     #define MODEM_NAME_LEN 32
     char name[MODEM_NAME_LEN + 1];
+
+    enum modem_state state;
 
     // Init string to send to the modem
     char * init;
@@ -62,6 +75,9 @@ struct session
     // Process ID of sesssion
     int pid;
 
+    // Time when the session was created
+    time_t born;
+
     // TX pipe to client
     int pipe_send;
     // RX pipe from client
@@ -82,9 +98,6 @@ struct session
         struct sockaddr_in out_addr;
     };
 
-    // Time when the session was created
-    time_t born;
-
     // Account associated with this session, null if not logged in
     struct account * acct;
 
@@ -101,16 +114,19 @@ struct session
 */
 
 
+// How many times per second to execute the main loop
+#define TICK_RATE 10
+
 // *** Setup all modems, returns number of modems initialized
 
 // How long to wait for the modem to reply to AT\r (in milliseconds)
 #define MODEM_INIT_TIMEOUT 100
 
 // Returns: number of modems initialized
-int modem_setup( char * path, struct modem *** list );
+int setup_modem( char * path, struct modem *** list );
 
 // *** Start the listening server
-int network_setup( char * addr );
+int setup_network( char * addr );
 
 // *** Accept a new modem connection
 // Returns: number modem of sessions created

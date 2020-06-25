@@ -22,7 +22,7 @@ struct {
     {      B0,     NULL }
 };
 
-int modem_setup( char * path, struct modem *** list )
+int setup_modem( char * path, struct modem *** list )
 {
     printf( "*** Configuring modems ***\r\n" );
 
@@ -115,6 +115,10 @@ int modem_setup( char * path, struct modem *** list )
         strncpy( (**list)->name, tok, MODEM_NAME_LEN );
         (**list)->name[MODEM_NAME_LEN + 1] = 0;
 
+        // Set modem to idle state
+        setDTR( mfd, 1 );
+        (**list)->state = modem_state_idle;
+
         // Get init string
         tok = strtok( NULL, "\n" );
 
@@ -150,7 +154,7 @@ int modem_setup( char * path, struct modem *** list )
     return mcount;
 }
 
-int network_setup( char * addr )
+int setup_network( char * addr )
 {
     printf( "*** Starting listening server ***\r\n" );
 

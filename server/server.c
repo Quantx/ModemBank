@@ -14,9 +14,9 @@ int main( int argc, char ** argv )
 {
     argc--; argv++; // Drop program name
 
-    int modm_size = modem_setup( "modem.cfg", &modm_tail );
+    int modm_size = setup_modem( "modem.cfg", &modm_tail );
 
-    int serv_sock = network_setup( "0.0.0.0:12345" );
+    int serv_sock = setup_network( "0.0.0.0:12345" );
 
     if ( serv_sock < 0 ) printf( "*** Failed to start listening server ***\r\n" );
 
@@ -26,6 +26,9 @@ int main( int argc, char ** argv )
         accept_modem( modm_head, &sess_tail );
         // Accept incoming network connections
         if ( serv_sock >= 0 ) accept_network( serv_sock, &sess_tail );
+
+        // Go to sleep for now
+        usleep( 1000000 / TICK_RATE );
     }
 
     return 0;
