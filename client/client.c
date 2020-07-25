@@ -12,18 +12,19 @@ int main( int argc, char ** argv )
     conn_in.fd = strtol( *argv, NULL, 16 );
 
     // Setup input file descriptor
-    conn_in.enabled = 1;
+    conn_in.flags.enabled = 1;
 
     // Check if this file descriptor is a TTY and set errno
-    conn_in.modem = isatty( conn_in.fd );
+    int istty = isatty( conn_in.fd );
     // Bad file descriptor
-    if ( !conn_in.modem && errno == EBADF )
+    if ( istty ) conn_in.flags.modem = 1;
+    else if ( errno == EBADF )
     {
         perror( "Failed to retrieve file descriptor" );
         return 1;
     }
 
-    while ( conn_in.enabled )
+    while ( conn_in.flags.enabled )
     {
 
 
