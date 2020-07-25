@@ -1,12 +1,16 @@
-#include "common.h"
+#include <stdio.h>
+#include <unistd.h>
+#include <stdlib.h>
 
-struct session {
-    #define ACCOUNT_LEN 16
-    char account[ACCOUNT_LEN + 1];
+struct connection
+{
+    int fd;
 
-    // User -> stdin -> stdout -> Remote
-    struct conn stdin;
-    struct conn stdout;
-
-    
+    struct {
+        unsigned int enabled : 0;
+        unsigned int modem : 1;
+    } flags;
 };
+
+// How many times per second to execute the main loop
+#define TICK_RATE 10

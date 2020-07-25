@@ -133,8 +133,8 @@ int spawn_client( int cli_fd, struct session * cli_sess )
         close( p_error[0] ); close( p_error[1] );
 
         // Convert client fd to an argument
-        char fdarg[10]; // Enough chars to hold INT_MAX
-        sprintf( fdarg, "%d", cli_fd );
+        char fdarg[9]; // Enough chars to hold INT_MAX in hex
+        sprintf( fdarg, "%X", cli_fd );
 
         // Generate arguments
         char * args[3];
