@@ -19,7 +19,7 @@ inline int getDTR( int fd )
 // Check if ring indicator is enabled
 inline int getRING( int fd )
 {
-    int status
+    int status;
     ioctl( fd, TIOCMGET, &status );
     return status & TIOCM_RNG;
 }
