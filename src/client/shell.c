@@ -12,20 +12,20 @@ struct {
 
 int cmd_help( int argc, char ** argv )
 {
-
+    return 0;
 }
 
 int cmd_exit( int argc, char ** argv )
 {
-
+    return 0;
 }
 
 int cmd_dial( int argc, char ** argv )
 {
-
+    return 0;
 }
 
 int cmd_connect( int arvc, char ** argv )
 {
-
+    return 0;
 }

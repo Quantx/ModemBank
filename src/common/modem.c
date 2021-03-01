@@ -1,7 +1,7 @@
 #include "modem.h"
 
 // Check if data carrier detect is enabled
-inline int getDCD( int fd )
+int getDCD( int fd )
 {
     int status;
     ioctl( fd, TIOCMGET, &status );
@@ -9,7 +9,7 @@ inline int getDCD( int fd )
 }
 
 // Check if data terminal ready is enabled
-inline int getDTR( int fd )
+int getDTR( int fd )
 {
     int status;
     ioctl( fd, TIOCMGET, &status );
@@ -17,7 +17,7 @@ inline int getDTR( int fd )
 }
 
 // Check if ring indicator is enabled
-inline int getRING( int fd )
+int getRING( int fd )
 {
     int status;
     ioctl( fd, TIOCMGET, &status );
@@ -25,7 +25,7 @@ inline int getRING( int fd )
 }
 
 // Enable or disable data termina ready
-inline void setDTR( int fd, int enable )
+void setDTR( int fd, int enable )
 {
     int status = TIOCM_DTR;
     ioctl( fd, enable ? TIOCMBIS : TIOCMBIC, &status );
