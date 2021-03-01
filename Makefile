@@ -4,7 +4,7 @@ COMMON_FILES = $(patsubst src/%.c,build/%.o,$(wildcard src/common/*.c))
 CLIENT_FILES = $(patsubst src/%.c,build/%.o,$(wildcard src/client/*.c))
 SERVER_FILES = $(patsubst src/%.c,build/%.o,$(wildcard src/server/*.c))
 
-.PHONY: client server bdirs clean
+.PHONY: client server build_client build_server bdirs clean
 all: client server
 
 build/%.o: src/%.c
@@ -16,11 +16,15 @@ bdirs:
 	mkdir -p build/client/
 	mkdir -p build/server/
 
-client: $(COMMON_FILES) $(CLIENT_FILES) | bdirs
+compile_client: $(COMMON_FILES) $(CLIENT_FILES)
 	$(CXX) -o bin/client $^
 
-server: $(COMMON_FILES) $(SERVER_FILES) | bdirs
+compile_server: $(COMMON_FILES) $(SERVER_FILES)
 	$(CXX) -o bin/server $^
+
+client: bdirs compile_client
+
+server: bdirs compile_server
 
 clean:
 	rm -rf build/
