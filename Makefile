@@ -1,31 +1,40 @@
 CXX = gcc
 CFLAGS = -g -rdynamic -Wall
-COMMON_FILES = $(patsubst src/%.c,build/%.o,$(wildcard src/common/*.c))
-CLIENT_FILES = $(patsubst src/%.c,build/%.o,$(wildcard src/client/*.c))
-SERVER_FILES = $(patsubst src/%.c,build/%.o,$(wildcard src/server/*.c))
+LIBS = -lsctp
+CENTRAL_FILES = $(patsubst src/%.c,build/%.o,$(wildcard src/central/*.c))
+WORKER_FILES  = $(patsubst src/%.c,build/%.o,$(wildcard src/worker/*.c))
+COMMON_FILES  = $(patsubst src/%.c,build/%.o,$(wildcard src/common/*.c))
+SECPIPE_FILES = $(patsubst src/%.c,build/%.o,$(wildcard src/secpipe/*.c))
+SECPIPE_DAEMON = src/secpipe/daemon/secpipe.c
 
-.PHONY: client server build_client build_server bdirs clean
-all: client server
+.PHONY: all clean make_central make_worker
+
+all: make_central make_worker secpipe
+
+make_central: build central
+
+make_worker: build worker
+
+clean:
+	rm -rf build/
+	rm central
+	rm worker
+	rm secpipe
 
 build/%.o: src/%.c
 	$(CXX) -c $(CFLAGS) $< -o $@
 
-bdirs:
-	mkdir -p bin
+build:
+	mkdir -p build/central/
+	mkdir -p build/worker/
 	mkdir -p build/common/
-	mkdir -p build/client/
-	mkdir -p build/server/
+	mkdir -p build/secpipe/
 
-compile_client: $(COMMON_FILES) $(CLIENT_FILES)
-	$(CXX) -o bin/client $^
+central: $(CENTRAL_FILES) $(COMMON_FILES) $(SECPIPE_FILES)
+	$(CXX) $^ $(LIBS) -o central
 
-compile_server: $(COMMON_FILES) $(SERVER_FILES)
-	$(CXX) -o bin/server $^
+worker: $(WORKER_FILES) $(COMMON_FILES) $(SECPIPE_FILES)
+	$(CXX) $^ $(LIBS) -o worker
 
-client: bdirs compile_client
-
-server: bdirs compile_server
-
-clean:
-	rm -rf build/
-	rm -rf bin/
+secpipe: $(SECPIPE_DAEMON)
+	$(CXX) $^ $(LIBS) -o secpipe
